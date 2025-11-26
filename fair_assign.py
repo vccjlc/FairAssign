@@ -51,9 +51,9 @@ USER_NAMES = [p["name"] for p in PARTICIPANTS]
 # For example, put a video file in the same folder and set:
 # CHRISTMAS_CLIP_PATH = "christmas_clip.mp4"
 # You can also set the CHRISTMAS_CLIP_PATH environment variable to a local filename or URL
-CHRISTMAS_CLIP_PATH = (os.getenv("CHRISTMAS_CLIP_PATH") or "christmas_clip.mp4")
+CHRISTMAS_CLIP_PATH = os.getenv("CHRISTMAS_CLIP_PATH", "christmas_clip.mp4")
 
-STATE_FILE = Path(__file__).with_name(f"fair_assign_state_{APP_MODE}.json")
+STATE_FILE = Path(f"fair_assign_state_{APP_MODE}.json")
 
 
 # ---------------------------------------------------------------------------
