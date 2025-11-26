@@ -47,11 +47,18 @@ PARTICIPANTS = [
 USER_PASSWORDS = {p["name"]: p["password"] for p in PARTICIPANTS}
 USER_NAMES = [p["name"] for p in PARTICIPANTS]
 
-# Change this path to point at your Christmas clip file
-# For example, put a video file in the same folder and set:
-# CHRISTMAS_CLIP_PATH = "christmas_clip.mp4"
-# You can also set the CHRISTMAS_CLIP_PATH environment variable to a local filename or URL
-CHRISTMAS_CLIP_PATH = os.getenv("CHRISTMAS_CLIP_PATH", "christmas_clip.mp4")
+# Base directory and media paths
+BASE_DIR = Path(__file__).parent
+
+CHRISTMAS_CLIP_PATH = os.getenv(
+    "CHRISTMAS_CLIP_PATH",
+    str(BASE_DIR / "assets" / "christmas_clip.mp4"),
+)
+
+SANTA_AUDIO_PATH = os.getenv(
+    "SANTA_AUDIO_PATH",
+    str(BASE_DIR / "assets" / "intro_jingle.mp3"),
+)
 
 STATE_FILE = Path(f"fair_assign_state_{APP_MODE}.json")
 
@@ -433,6 +440,53 @@ def show_test_panel(state: Dict) -> None:
 # Main app
 # ---------------------------------------------------------------------------
 
+def show_entry_gate() -> bool:
+    """
+    Show a big 'Play & enter' button the first time.
+    After the user clicks it, play intro audio once and let the rest of the app render.
+    Returns True if the main UI should continue, False if we should stop after the gate.
+    """
+
+    # If the user has already entered, play audio once (if available) and continue
+    if st.session_state.get("entered_lodge"):
+        if SANTA_AUDIO_PATH and not st.session_state.get("intro_audio_played"):
+            try:
+                # autoplay=True is supported; browser may still block it but we request it
+                st.audio(
+                    SANTA_AUDIO_PATH,
+                    format="audio/mp3",
+                    start_time=0,
+                    autoplay=True,
+                )
+            except Exception:
+                st.warning("Intro music not available; check SANTA_AUDIO_PATH.")
+            st.session_state["intro_audio_played"] = True
+        return True
+
+    # First visit; show gate with big button
+    st.markdown(
+        """
+        <div class="christmas-card" style="text-align:center;">
+            <h2 style="margin-bottom: 0.5rem;">Welcome to the Christmas lodge</h2>
+            <p style="margin-bottom: 1rem;">Press play to enter and start the music.</p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    entered = st.button(
+        "▶ Play & enter",
+        key="enter_lodge_button",
+        use_container_width=True,
+    )
+
+    if entered:
+        st.session_state["entered_lodge"] = True
+        # Trigger full rerun; next time we will be in the 'already entered' branch
+        st.experimental_rerun()
+
+    return False
+
 def main() -> None:
     st.set_page_config(
         page_title="Fair Assign – Secret Santa",
@@ -449,6 +503,11 @@ def main() -> None:
     )
 
     st.caption(f"Current mode: {APP_MODE.upper()}")
+
+    # NEW: entry gate with big Play button and intro audio
+    if not show_entry_gate():
+        # User has not pressed Play yet; do not show login or anything else
+        return
 
     state = load_state()
 
