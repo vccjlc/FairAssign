@@ -1,0 +1,15 @@
+# Python cache
+__pycache__/
+*.pyc
+
+# Streamlit local secrets (if used)
+.streamlit/secrets.toml
+
+# App runtime state files
+fair_assign_state_*.json
+fair_assign_state_*.tmp
+
+# OS junk
+.DS_Store
+Thumbs.db
+
