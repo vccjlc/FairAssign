@@ -224,30 +224,36 @@ def add_christmas_style() -> None:
         """
         <style>
         [data-testid="stAppViewContainer"] {
-            background: radial-gradient(circle at top, #ffe6e6, #ffffff);
+            background: radial-gradient(circle at top, #ffecec, #ffffff);
         }
         [data-testid="stHeader"] {
             background-color: rgba(0, 0, 0, 0);
         }
         .christmas-card {
-            background-color: #ffffffdd;
-            padding: 1.5rem 1.75rem;
-            border-radius: 1.2rem;
-            border: 1px solid #f3caca;
-            box-shadow: 0 0.5rem 1.5rem rgba(0, 0, 0, 0.08);
+            background-color: #ffffff;
+            padding: 1.5rem 2rem;
+            border-radius: 1rem;
+            border: 1px solid #eed6d6;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.06);
+            max-width: 640px;
+            margin: 1.5rem auto;
         }
         .christmas-title {
             text-align: center;
-            font-size: 2.1rem;
+            font-size: 2rem;
             font-weight: 700;
-            color: #b30000;
-            margin-bottom: 0.3rem;
+            color: #b03030;
+            margin-top: 0.5rem;
+            margin-bottom: 0.2rem;
         }
         .christmas-subtitle {
             text-align: center;
             font-size: 1rem;
-            color: #555555;
-            margin-bottom: 1.4rem;
+            color: #555;
+            margin-bottom: 0.8rem;
+        }
+        [data-testid="stCaptionContainer"] p {
+            color: #444444 !important;
         }
         </style>
         """,
@@ -257,6 +263,7 @@ def add_christmas_style() -> None:
 
 def show_login() -> str | None:
     """Show login form and return the authenticated user name, or None."""
+    st.markdown('<div class="christmas-card">', unsafe_allow_html=True)
     st.subheader("Log in")
 
     with st.form("login_form"):
@@ -273,6 +280,7 @@ def show_login() -> str | None:
         else:
             st.error("Invalid password")
 
+    st.markdown("</div>", unsafe_allow_html=True)
     return st.session_state.get("current_user")
 
 
@@ -468,7 +476,7 @@ def show_entry_gate() -> bool:
         """
         <div class="christmas-card" style="text-align:center;">
             <h2 style="margin-bottom: 0.5rem;">Welcome to the Christmas lodge</h2>
-            <p style="margin-bottom: 1rem;">Press play to enter and start the music.</p>
+            <p style="margin-bottom: 1rem;">Press play to enter</p>
         </div>
         """,
         unsafe_allow_html=True,
@@ -483,7 +491,7 @@ def show_entry_gate() -> bool:
     if entered:
         st.session_state["entered_lodge"] = True
         # Trigger full rerun; next time we will be in the 'already entered' branch
-        st.experimental_rerun()
+        st.rerun()
 
     return False
 
@@ -502,7 +510,12 @@ def main() -> None:
         unsafe_allow_html=True,
     )
 
-    st.caption(f"Current mode: {APP_MODE.upper()}")
+    st.markdown(
+        f"<p style='text-align:center; color:#444; font-size:0.9rem;'>"
+        f"Current mode: <strong>{APP_MODE.upper()}</strong>"
+        "</p>",
+        unsafe_allow_html=True,
+    )
 
     # NEW: entry gate with big Play button and intro audio
     if not show_entry_gate():
@@ -526,7 +539,7 @@ def main() -> None:
     st.sidebar.write(f"Logged in as: **{current_user}**")
     if st.sidebar.button("Log out"):
         st.session_state.clear()
-        st.experimental_rerun()
+        st.rerun()
 
     # Generate assignments once possible
     ensure_assignments(state)
