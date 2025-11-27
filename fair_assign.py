@@ -38,11 +38,11 @@ if APP_MODE not in ("test", "prod"):
     APP_MODE = "test"
 
 PARTICIPANTS = [
-    {"name": "Magda", "password": "Magda1"},
-    {"name": "Maria", "password": "Maria2"},
-    {"name": "Asia", "password": "Asia3"},
-    {"name": "Zuza", "password": "Zuza4"},
-    {"name": "Jan", "password": "Jan5"},
+    {"name": "Magda", "password": "menel36"},
+    {"name": "Maria", "password": "flanela8"},
+    {"name": "Asia", "password": "pkszubr"},
+    {"name": "Zuza", "password": "alessi5"},
+    {"name": "Jan", "password": "bbbb"},
 ]
 
 USER_PASSWORDS = {p["name"]: p["password"] for p in PARTICIPANTS}
@@ -693,10 +693,6 @@ def show_preferences_ui(user_name: str, state: Dict) -> None:
         except Exception:
             pass
 
-    st.markdown(
-        '<div class="caption-bg small">You can list up to seven ideas </div>',
-        unsafe_allow_html=True,
-    )
 
     # Initialize inputs and autosave on change
     for i in range(7):
@@ -835,9 +831,50 @@ def show_assignment_ui(user_name: str, state: Dict) -> None:
     # Reservation info moved below and hidden behind an expander
     with st.expander("Info"):
         st.markdown(
-            '<div class="caption-bg">The person whose wishlist you see does not see which item was reserved. '
-            'Other buyers can see reservations to avoid duplicates. '
-            'The giftee only sees that some items are reserved.</div>',
+            """
+            <div class="caption-bg">
+              <ul style="margin:0 0 0.25rem 1rem;">
+                <li><strong>Everything is wired, but no PDFs?</strong> Your extractor might be seeing no usable refs.</li>
+                <li><strong>Confirm custom fields made it into the shaped ticket</strong>
+                  <div><pre style="white-space:pre-wrap; margin:0.25rem 0 0;">
+st.write("DEBUG custom_fields:", shaped.get("custom_fields"))
+st.write("DEBUG custom_fields_raw:", ((shaped.get("kayako") or {}).get("conversation") or {}).get("custom_fields_raw"))
+                  </pre></div>
+                </li>
+                <li><strong>Check detection of GitHub / Jira refs</strong>
+                  <div><pre style="white-space:pre-wrap; margin:0.25rem 0 0;">
+st.write("DEBUG gh_refs:", gh_refs)
+st.write("DEBUG jr_refs:", jr_refs)
+                  </pre></div>
+                </li>
+                <li><strong>GitHub default repo for numeric-only fields</strong> — create <code>config/issues_mappings.json</code> with a product default:
+                  <div><pre style="white-space:pre-wrap; margin:0.25rem 0 0;">
+{
+  "product_default_github": {
+    "YOUR_PRODUCT_SLUG": "your-org/your-repo"
+  },
+  "jira_project_bases": {},
+  "defaults": {}
+}
+                  </pre></div>
+                </li>
+                <li><strong>Jira base URL</strong> — map project keys or set a default:
+                  <div><pre style="white-space:pre-wrap; margin:0.25rem 0 0;">
+{
+  "jira_project_bases": {
+    "ABC": "https://yourcompany.atlassian.net"
+  },
+  "defaults": {
+    "jira_base_url": "https://yourcompany.atlassian.net"
+  }
+}
+                  </pre></div>
+                </li>
+                <li><strong>Auth</strong> — GitHub: <code>GITHUB_TOKEN</code> or <code>GH_TOKEN</code>. Jira: <code>JIRA_BEARER_TOKEN</code> or <code>JIRA_EMAIL</code> + <code>ATLASSIAN_API_TOKEN</code>.</li>
+                <li><strong>Sanity test</strong> — temporarily set <code>shaped["custom_fields"]["GHI issue"] = "1234"</code> (with default repo configured) to verify a PDF is produced.</li>
+              </ul>
+            </div>
+            """,
             unsafe_allow_html=True,
         )
 
@@ -845,6 +882,7 @@ def show_assignment_ui(user_name: str, state: Dict) -> None:
     if CHRISTMAS_CLIP_PATH:
         st.markdown('<div class="caption-bg"><strong>See how the drawing was made</strong></div>', unsafe_allow_html=True)
         if st.button("See how the drawing was made", key=f"see_video_{user_name}", use_container_width=True):
+            st.session_state["video_loading"] = True
             st.session_state["main_view"] = "video"
             st.session_state["bg_music_on"] = False
             _safe_rerun()
@@ -861,45 +899,53 @@ def show_video_page() -> None:
         st.info("No video configured.")
         return
 
-    # Maximize the video viewing area similar to the previous fullscreen style
-    st.markdown(
-        """
-        <style>
-        [data-testid="stSidebar"] { display: none !important; }
-        [data-testid="stHeader"] { display: none !important; }
-        .block-container { padding: 0 !important; margin: 0 !important; }
-        .fs-video { width: 100vw; height: 100vh; object-fit: contain; background: #000; }
-        </style>
-        """,
-        unsafe_allow_html=True,
-    )
+    # Center the video inside a nice card, similar to previous styling
+    st.markdown('<div class="christmas-card">', unsafe_allow_html=True)
+    st.markdown('<div class="caption-bg"><strong>See how the drawing was made</strong></div>', unsafe_allow_html=True)
 
-    try:
-        if video_src.startswith(("http://", "https://", "data:")):
-            st.markdown(
-                f'<video src="{video_src}" class="fs-video" controls playsinline></video>',
-                unsafe_allow_html=True,
-            )
-        else:
-            vpath = Path(video_src)
-            if not vpath.exists():
-                assets = BASE_DIR / "assets"
-                if assets.exists():
-                    for f in assets.glob("*"):
-                        if f.name.lower() == vpath.name.lower():
-                            vpath = f
-                            break
-            if vpath.exists():
-                data = vpath.read_bytes()
-                b64 = base64.b64encode(data).decode()
+    is_loading = bool(st.session_state.pop("video_loading", False))
+
+    def render_video() -> None:
+        try:
+            if video_src.startswith(("http://", "https://", "data:")):
                 st.markdown(
-                    f'<video class="fs-video" controls playsinline src="data:video/mp4;base64,{b64}"></video>',
+                    f'<video preload="metadata" controls playsinline '
+                    f'style="width:100%; border-radius:12px; opacity:0.95; box-shadow: 0 8px 24px rgba(0,0,0,0.08);" '
+                    f'src="{video_src}"></video>',
                     unsafe_allow_html=True,
                 )
             else:
-                st.video(video_src, format="video/mp4")
-    except Exception:
-        st.video(video_src, format="video/mp4")
+                vpath = Path(video_src)
+                if not vpath.exists():
+                    assets = BASE_DIR / "assets"
+                    if assets.exists():
+                        for f in assets.glob("*"):
+                            if f.name.lower() == vpath.name.lower():
+                                vpath = f
+                                break
+                if vpath.exists():
+                    b64 = _read_file_b64(str(vpath)) or ""
+                    if b64:
+                        st.markdown(
+                            f'<video preload="metadata" controls playsinline '
+                            f'style="width:100%; border-radius:12px; opacity:0.95; box-shadow: 0 8px 24px rgba(0,0,0,0.08);" '
+                            f'src="data:video/mp4;base64,{b64}"></video>',
+                            unsafe_allow_html=True,
+                        )
+                    else:
+                        st.video(str(vpath), format="video/mp4")
+                else:
+                    st.video(video_src, format="video/mp4")
+        except Exception:
+            st.video(video_src, format="video/mp4")
+
+    if is_loading:
+        with st.spinner("Loading..."):
+            render_video()
+    else:
+        render_video()
+
+    st.markdown("</div>", unsafe_allow_html=True)
 
 
 def render_bottom_video_cta(current_user: str | None) -> None:
@@ -911,6 +957,7 @@ def render_bottom_video_cta(current_user: str | None) -> None:
     st.markdown('<div class="christmas-card">', unsafe_allow_html=True)
     st.markdown('<div class="caption-bg small">See how the drawing was made</div>', unsafe_allow_html=True)
     if st.button("See how the drawing was made", key=f"see_video_cta_{current_user}", use_container_width=True):
+        st.session_state["video_loading"] = True
         st.session_state["main_view"] = "video"
         st.session_state["bg_music_on"] = False
         _safe_rerun()
