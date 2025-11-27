@@ -729,7 +729,7 @@ def show_entry_gate() -> bool:
     )
 
     entered = st.button(
-        "▶ Enter",
+        "▶ Play & enter",
         key="enter_lodge_button",
         use_container_width=True,
     )
