@@ -415,7 +415,7 @@ def add_christmas_style() -> None:
     outline: none;
 }
 .stButton > button:disabled, .stButton > button[disabled], .stButton > button[aria-disabled="true"] {
-    opacity: 0.8 !important;
+    opacity: 0.5 !important;
     filter: none !important;
 }
 .buying-for {
