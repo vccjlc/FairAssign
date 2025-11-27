@@ -867,7 +867,6 @@ def show_assignment_ui(user_name: str, state: Dict) -> None:
 
         # Video moved to a dedicated subpage to avoid impacting core page load
         if CHRISTMAS_CLIP_PATH:
-            st.markdown('<div class="caption-bg"><strong>See how the drawing was made</strong></div>', unsafe_allow_html=True)
             if st.button("See how the drawing was made", key=f"see_video_{user_name}", use_container_width=True):
                 st.session_state["video_loading"] = True
                 st.session_state["main_view"] = "video"
@@ -894,7 +893,7 @@ def show_video_page() -> None:
             if video_src.startswith(("http://", "https://", "data:")):
                 st.markdown(
                     f'<video preload="metadata" controls playsinline '
-                    f'style="width:100%; border-radius:12px; opacity:0.95; box-shadow: 0 8px 24px rgba(0,0,0,0.08);" '
+                    f'style="width:100%; border-radius:12px; opacity:0.8; box-shadow: 0 8px 24px rgba(0,0,0,0.08);" '
                     f'src="{video_src}"></video>',
                     unsafe_allow_html=True,
                 )
