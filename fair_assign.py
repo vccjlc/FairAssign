@@ -690,14 +690,42 @@ def show_assignment_ui(user_name: str, state: Dict) -> None:
     st.markdown('<div class="christmas-card">', unsafe_allow_html=True)
     st.subheader("Your Secret Santa draw")
 
-    # If requested, play ho-ho-ho once when entering the view
-    if st.session_state.pop("play_ho_ho_once", False):
-        play_hidden_audio(HO_HO_AUDIO_PATH)
+    # Pause background jingle while video with sound is present
+    st.session_state["bg_music_on"] = False
+    st.session_state["resume_bg_after_assignment"] = True
 
-    # Show fullscreen clip once if requested and stop rendering further until user continues
-    if show_fullscreen_clip_once(CHRISTMAS_CLIP_PATH):
-        st.markdown("</div>", unsafe_allow_html=True)
-        return
+    # One-time explanation for what "Reserved" means
+    st.caption(
+        "Note: The person whose wishlist you see does not see which item was reserved. "
+        "Other buyers can see reservations to avoid duplicates. "
+        "The giftee only sees that some items are reserved."
+    )
+
+    # One-time shake effect
+    if st.session_state.pop("shake_screen", False):
+        st.markdown(
+            """
+            <style>
+            @keyframes shake {
+              0% { transform: translate(0, 0) }
+              20% { transform: translate(-3px, 1px) }
+              40% { transform: translate(3px, -1px) }
+              60% { transform: translate(-3px, 1px) }
+              80% { transform: translate(3px, 0) }
+              100% { transform: translate(0, 0) }
+            }
+            .stApp { animation: shake 0.6s ease-in-out 1; }
+            </style>
+            """,
+            unsafe_allow_html=True,
+        )
+
+    # Show the clip inline within the assignment card (with sound)
+    if CHRISTMAS_CLIP_PATH:
+        try:
+            st.video(CHRISTMAS_CLIP_PATH)
+        except Exception:
+            pass
 
     recipients = get_recipients_for_giver(state, user_name)
     if not recipients:
@@ -719,11 +747,20 @@ def show_assignment_ui(user_name: str, state: Dict) -> None:
             continue
         with header_cols[1]:
             try:
-                wishlist_text = "\n".join(
-                    f"{i + 1}. {it.get('text','')}"
-                    for i, it in enumerate(prefs)
-                    if isinstance(it, dict) and it.get("text")
-                ) or "No wishlist items"
+                lines = []
+                for i, it in enumerate(prefs):
+                    if not isinstance(it, dict):
+                        continue
+                    txt = (it.get("text") or "").strip()
+                    if not txt:
+                        continue
+                    status = it.get("status", "open")
+                    marked_by = it.get("marked_by")
+                    suffix = ""
+                    if status == "reserved":
+                        suffix = " - Reserved by you" if marked_by == user_name else " - Reserved by someone"
+                    lines.append(f"{i + 1}. {txt}{suffix}")
+                wishlist_text = "\n".join(lines) or "No wishlist items"
                 st.download_button(
                     label="Download wishlist (.txt)",
                     data=wishlist_text,
@@ -741,14 +778,10 @@ def show_assignment_ui(user_name: str, state: Dict) -> None:
 
             cols = st.columns([6, 2, 2])
             with cols[0]:
-                info_tip = (
-                    f"{recipient} does not see that this gift was reserved. "
-                    f"Other people can see it so they don't buy it a second time. "
-                    f"{recipient} only sees that some items were marked as reserved."
-                )
                 label_html = f"{idx + 1}. {text}"
                 if status == "reserved":
-                    label_html += f' <span class="reserved-badge">Reserved</span> <span title="{info_tip}">ℹ</span>'
+                    badge = "Reserved by you" if marked_by == user_name else "Reserved by someone"
+                    label_html += f' <span class="reserved-badge">{badge}</span>'
                 st.markdown(label_html, unsafe_allow_html=True)
 
             # Actions
@@ -899,18 +932,19 @@ def show_home_menu(state: Dict, current_user: str) -> None:
     with col1:
         if st.button("⭐ See who you got", use_container_width=True):
             st.session_state["main_view"] = "assignment"
-            # Play ho-ho-ho when switching to see assignment
-            st.session_state["play_ho_ho_once"] = True
-            # Pause background jingle for 20 seconds, then resume
-            st.session_state["bg_music_paused_until"] = time.time() + 20
-            st.session_state["resume_bg_after_ho"] = True
+            # Pause background jingle during video playback
             st.session_state["bg_music_on"] = False
+            st.session_state.pop("bg_music_paused_until", None)
+            st.session_state["resume_bg_after_assignment"] = True
             # Fun effect
             st.session_state["shake_screen"] = True
 
     with col2:
         if st.button("🎁 Edit your wishlist", use_container_width=True):
             st.session_state["main_view"] = "wishlist"
+            # Resume background jingle if it was paused for assignment
+            if st.session_state.pop("resume_bg_after_assignment", False):
+                st.session_state["bg_music_on"] = True
 
     # Status hint (show once for up to 30 seconds, then never again this session)
     if state.get("assignments_generated"):
