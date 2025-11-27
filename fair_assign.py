@@ -423,6 +423,17 @@ def add_christmas_style() -> None:
 
 def render_background_music() -> None:
     """Render looping background music if enabled."""
+    # Honor temporary pause (e.g., during ho-ho-ho)
+    pause_until = st.session_state.get("bg_music_paused_until")
+    if pause_until is not None:
+        now = time.time()
+        if now < pause_until:
+            return
+        # Pause expired; resume if requested
+        st.session_state.pop("bg_music_paused_until", None)
+        if st.session_state.pop("resume_bg_after_ho", False):
+            st.session_state["bg_music_on"] = True
+
     if not st.session_state.get("bg_music_on"):
         return
     if not SANTA_AUDIO_PATH:
@@ -700,7 +711,7 @@ def show_assignment_ui(user_name: str, state: Dict) -> None:
     for recipient in recipients:
         header_cols = st.columns([4, 2])
         with header_cols[0]:
-            st.markdown(f"**{recipient}**")
+            st.markdown(f"**{recipient}'s wishlist**")
         prefs = state["users"].get(recipient, {}).get("preferences") or []
         if not prefs:
             st.caption(f"{recipient} didn't add any wishlist item yet. Use your imagination or contact {recipient}!")
@@ -890,8 +901,12 @@ def show_home_menu(state: Dict, current_user: str) -> None:
             st.session_state["main_view"] = "assignment"
             # Play ho-ho-ho when switching to see assignment
             st.session_state["play_ho_ho_once"] = True
-            # Show fullscreen clip once before revealing details
-            st.session_state["show_assignment_clip"] = True
+            # Pause background jingle for 20 seconds, then resume
+            st.session_state["bg_music_paused_until"] = time.time() + 20
+            st.session_state["resume_bg_after_ho"] = True
+            st.session_state["bg_music_on"] = False
+            # Fun effect
+            st.session_state["shake_screen"] = True
 
     with col2:
         if st.button("🎁 Edit your wishlist", use_container_width=True):
