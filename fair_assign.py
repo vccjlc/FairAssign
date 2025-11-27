@@ -1098,10 +1098,6 @@ def show_home_menu(state: Dict, current_user: str) -> None:
     Sets st.session_state["main_view"] accordingly.
     """
 
-    # Default to home (no view selected) until user clicks a button
-    if "main_view" not in st.session_state:
-        st.session_state["main_view"] = "home"
-
     with st.container(border=True):
         st.subheader("What would you like to do?")
 
@@ -1111,11 +1107,13 @@ def show_home_menu(state: Dict, current_user: str) -> None:
             if st.button("⭐ See who you got", use_container_width=True):
                 st.session_state["main_view"] = "assignment"
                 st.session_state["bg_music_on"] = False
+                _safe_rerun()
 
         with col2:
             if st.button("🎁 Edit your wishlist", use_container_width=True):
                 st.session_state["main_view"] = "wishlist"
                 st.session_state["bg_music_on"] = True
+                _safe_rerun()
 
         # Status hint (show once for up to 30 seconds, then never again this session)
         if state.get("assignments_generated"):
