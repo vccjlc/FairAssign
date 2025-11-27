@@ -304,6 +304,11 @@ def ensure_assignments(state: Dict) -> None:
         state["assignments"] = generate_assignments(USER_NAMES, ASSIGNMENTS_PER_GIVER)
         state["assignments_generated"] = True
         save_state(state)
+    else:
+        # Valid assignments exist; ensure the flag is set
+        if not state.get("assignments_generated"):
+            state["assignments_generated"] = True
+            save_state(state)
 
 
 def authenticate(name: str, password: str) -> bool:
@@ -486,7 +491,7 @@ def show_preferences_ui(user_name: str, state: Dict) -> None:
     existing_prefs = user_state.get("preferences") or []
 
     st.markdown('<div class="christmas-card">', unsafe_allow_html=True)
-    st.subheader("Your Christmas wishlist")
+    st.subheader("Edit your wishlist")
 
     # Caution caption if others have reserved/bought items
     any_marked = any(
@@ -748,9 +753,9 @@ def show_home_menu(state: Dict, current_user: str) -> None:
     Sets st.session_state["main_view"] accordingly.
     """
 
-    # Default selection
+    # Default to home (no view selected) until user clicks a button
     if "main_view" not in st.session_state:
-        st.session_state["main_view"] = "wishlist"
+        st.session_state["main_view"] = "home"
 
     st.markdown('<div class="christmas-card">', unsafe_allow_html=True)
     st.subheader("What would you like to do?")
@@ -831,21 +836,13 @@ def main() -> None:
     show_home_menu(state, current_user)
 
     # Decide what to show based on selected view
-    view = st.session_state.get("main_view", "wishlist")
+    view = st.session_state.get("main_view", "home")
 
     if view == "wishlist":
         show_preferences_ui(current_user, state)
     elif view == "assignment":
-        if state.get("assignments_generated"):
-            show_assignment_ui(current_user, state)
-        else:
-            st.markdown('<div class="christmas-card">', unsafe_allow_html=True)
-            st.subheader("Your draw is not ready yet")
-            st.info(
-                "At least one person has not saved their wishlist yet. "
-                "Once everyone is done, the draw will be finalized and you will see your assignment here."
-            )
-            st.markdown("</div>", unsafe_allow_html=True)
+        # Always allow viewing assignment immediately
+        show_assignment_ui(current_user, state)
 
     if APP_MODE == "test":
         show_test_panel(state)
