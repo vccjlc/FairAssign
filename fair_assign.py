@@ -355,6 +355,46 @@ def add_christmas_style() -> None:
 [data-testid="stHeader"] {
     background-color: rgba(0, 0, 0, 0);
 }
+[data-testid="stDecoration"] {
+    display: none !important;
+}
+.caption-bg, .christmas-card .caption-bg {
+    background: #e9edf5;
+    padding: 0.5rem 0.75rem;
+    border-radius: 0.5rem;
+    margin-bottom: 0.6rem;
+    border: 1px solid #d6dbea;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.03);
+}
+.caption-bg.small, .christmas-card .caption-bg.small {
+    font-size: 0.95rem;
+}
+
+/* Card look for Streamlit containers created with border=True */
+[data-testid="stVerticalBlockBorderWrapper"] {
+    background-color: #ffffffee;
+    padding: 1.5rem 2rem;
+    border-radius: 1rem;
+    border: 1px solid #eed6d6;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.06);
+    max-width: 640px;
+    margin: 1.5rem auto;
+    color: #111111;
+}
+[data-testid="stVerticalBlockBorderWrapper"] input[type="text"] {
+    background-color: #f7f7fb;
+    color: #222222;
+    border: 1px solid #e7e7ef;
+}
+[data-testid="stVerticalBlockBorderWrapper"] input[type="text"]::placeholder {
+    color: #9aa1b0;
+}
+[data-testid="stVerticalBlockBorderWrapper"] input[type="text"]:focus {
+    border-color: #d0d6f0;
+    box-shadow: 0 0 0 3px rgba(105,145,255,0.15);
+    outline: none;
+}
+
 .christmas-card {
     background-color: #ffffffee;
     padding: 1.5rem 2rem;
@@ -378,16 +418,9 @@ def add_christmas_style() -> None:
     box-shadow: 0 0 0 3px rgba(105,145,255,0.15);
     outline: none;
 }
-.christmas-card .caption-bg {
-    background: #e9edf5;
-    padding: 0.5rem 0.75rem;
-    border-radius: 0.5rem;
-    margin-bottom: 0.6rem;
-    border: 1px solid #d6dbea;
-    box-shadow: 0 1px 2px rgba(0,0,0,0.03);
-}
-.christmas-card .caption-bg.small {
-    font-size: 0.95rem;
+.stButton > button:disabled, .stButton > button[disabled], .stButton > button[aria-disabled="true"] {
+    opacity: 1 !important;
+    filter: none !important;
 }
 .buying-for {
     font-size: 1.25rem;
@@ -641,24 +674,22 @@ def on_wishlist_change(user_name: str, state: Dict) -> None:
 
 def show_login() -> str | None:
     """Show login form and return the authenticated user name, or None."""
-    st.markdown('<div class="christmas-card">', unsafe_allow_html=True)
-    st.subheader("Log in")
+    with st.container(border=True):
+        st.subheader("Log in")
 
-    with st.form("login_form"):
-        name = st.selectbox("Who are you", USER_NAMES)
-        password = st.text_input("Password", type="password")
-        submitted = st.form_submit_button("Enter the Christmas lodge")
+        with st.form("login_form"):
+            name = st.selectbox("Who are you", USER_NAMES)
+            password = st.text_input("Password", type="password")
+            submitted = st.form_submit_button("Enter the Christmas lodge")
 
-    if submitted:
-        if authenticate(name, password):
-            st.session_state["current_user"] = name
-            st.success(f"Welcome, {name}")
-            # Trigger a rerun so we skip the login form
-            _safe_rerun()
-        else:
-            st.error("Invalid password")
-
-    st.markdown("</div>", unsafe_allow_html=True)
+        if submitted:
+            if authenticate(name, password):
+                st.session_state["current_user"] = name
+                st.success(f"Welcome, {name}")
+                # Trigger a rerun so we skip the login form
+                _safe_rerun()
+            else:
+                st.error("Invalid password")
     return st.session_state.get("current_user")
 
 
@@ -667,227 +698,183 @@ def show_preferences_ui(user_name: str, state: Dict) -> None:
     user_state = state["users"][user_name]
     existing_prefs = user_state.get("preferences") or []
 
-    st.markdown('<div class="christmas-card">', unsafe_allow_html=True)
-    st.markdown('<div class="caption-bg"><h3 style="margin:0;">Edit your wishlist</h3></div>', unsafe_allow_html=True)
+    with st.container(border=True):
+        st.markdown('<div class="caption-bg"><h3 style="margin:0;">Edit your wishlist</h3></div>', unsafe_allow_html=True)
 
-    # Caution caption if others have reserved/bought items
-    any_marked = any(
-        isinstance(item, dict)
-        and item.get("status") in ("reserved",)
-        and item.get("marked_by") != user_name
-        for item in existing_prefs
-    )
-    if any_marked:
-        st.markdown(
-            '<div class="caption-bg small">Some of your gifts might have been reserved! '
-            "Be careful with editing.</div>",
-            unsafe_allow_html=True,
+        # Caution caption if others have reserved/bought items
+        any_marked = any(
+            isinstance(item, dict)
+            and item.get("status") in ("reserved",)
+            and item.get("marked_by") != user_name
+            for item in existing_prefs
         )
+        if any_marked:
+            st.markdown(
+                '<div class="caption-bg small">Some of your gifts might have been reserved! '
+                "Be careful with editing.</div>",
+                unsafe_allow_html=True,
+            )
 
-    # Show ephemeral saved caption at the top (visible for ~5s after save)
-    ts = st.session_state.get("wishlist_saved_ts")
-    if ts is not None:
-        try:
-            if (time.time() - ts) <= 5:
-                st.caption("✓ Wishlist saved")
-        except Exception:
-            pass
+        # Show ephemeral saved caption at the top (visible for ~5s after save)
+        ts = st.session_state.get("wishlist_saved_ts")
+        if ts is not None:
+            try:
+                if (time.time() - ts) <= 5:
+                    st.caption("✓ Wishlist saved")
+            except Exception:
+                pass
 
 
-    # Initialize inputs and autosave on change
-    for i in range(7):
-        default_value = ""
-        if i < len(existing_prefs) and isinstance(existing_prefs[i], dict):
-            default_value = existing_prefs[i].get("text", "")
-        st.text_input(
-            f"Gift idea {i + 1}",
-            value=default_value,
-            key=f"wishlist_input_{user_name}_{i}",
-            on_change=on_wishlist_change,
-            args=(user_name, state),
-        )
+        # Initialize inputs and autosave on change
+        for i in range(7):
+            default_value = ""
+            if i < len(existing_prefs) and isinstance(existing_prefs[i], dict):
+                default_value = existing_prefs[i].get("text", "")
+            st.text_input(
+                f"Gift idea {i + 1}",
+                value=default_value,
+                key=f"wishlist_input_{user_name}_{i}",
+                on_change=on_wishlist_change,
+                args=(user_name, state),
+            )
 
-    # Repeat the ephemeral saved caption at the bottom
-    ts = st.session_state.get("wishlist_saved_ts")
-    if ts is not None:
-        try:
-            if (time.time() - ts) <= 5:
-                st.caption("✓ Wishlist saved")
-        except Exception:
-            pass
+        # Repeat the ephemeral saved caption at the bottom
+        ts = st.session_state.get("wishlist_saved_ts")
+        if ts is not None:
+            try:
+                if (time.time() - ts) <= 5:
+                    st.caption("✓ Wishlist saved")
+            except Exception:
+                pass
 
-    completed = sum(1 for u in state["users"].values() if u.get("confirmed"))
-    total = len(state["users"])
-    st.info(f"{completed} of {total} participants have saved their wishlist.")
+        completed = sum(1 for u in state["users"].values() if u.get("confirmed"))
+        total = len(state["users"])
+        st.info(f"{completed} of {total} participants have saved their wishlist.")
 
-    # Status overview for fun; full details in test mode developer panel
-    with st.expander("Progress of everyone", expanded=False):
-        for name, u in state["users"].items():
-            mark = "✓" if u.get("confirmed") else "•"
-            st.write(f"{mark} {name}")
-
-    st.markdown("</div>", unsafe_allow_html=True)
+        # Status overview for fun; full details in test mode developer panel
+        with st.expander("Progress of everyone", expanded=False):
+            for name, u in state["users"].items():
+                mark = "✓" if u.get("confirmed") else "•"
+                st.write(f"{mark} {name}")
 
 
 def show_assignment_ui(user_name: str, state: Dict) -> None:
     """Page where a user sees their final assignment and can mark items reserved/bought."""
-    st.markdown('<div class="christmas-card">', unsafe_allow_html=True)
-    st.subheader("Your Secret Santa draw")
+    with st.container(border=True):
+        st.subheader("Your Secret Santa draw")
 
-    # Pause background music while on assignment view
-    st.session_state["bg_music_on"] = False
+        # Pause background music while on assignment view
+        st.session_state["bg_music_on"] = False
 
-    # Shake effect removed per request
+        recipients = get_recipients_for_giver(state, user_name)
+        if not recipients:
+            st.info("Assignments are not ready yet. Please check back later.")
+            return
 
-    # (Video moved to bottom of the card so the list appears immediately)
-
-    recipients = get_recipients_for_giver(state, user_name)
-    if not recipients:
-        st.info("Assignments are not ready yet. Please check back later.")
-        st.markdown("</div>", unsafe_allow_html=True)
-        return
-
-    st.markdown('<div class="buying-for">You are buying gifts for: ' + ", ".join(recipients) + "</div>", unsafe_allow_html=True)
-    st.write("")
-
-    for recipient in recipients:
-        header_cols = st.columns([4, 2])
-        with header_cols[0]:
-            st.markdown(f"**{recipient}'s wishlist**")
-        prefs = state["users"].get(recipient, {}).get("preferences") or []
-        if not prefs:
-            st.markdown(
-                f'<div class="caption-bg small">{recipient} didn\'t add any wishlist item yet. '
-                f'Use your imagination or contact {recipient}!</div>',
-                unsafe_allow_html=True,
-            )
-            st.write("")
-            continue
-        with header_cols[1]:
-            try:
-                lines = []
-                for i, it in enumerate(prefs):
-                    if not isinstance(it, dict):
-                        continue
-                    txt = (it.get("text") or "").strip()
-                    if not txt:
-                        continue
-                    status = it.get("status", "open")
-                    marked_by = it.get("marked_by")
-                    suffix = ""
-                    if status == "reserved":
-                        suffix = " - Reserved by you" if marked_by == user_name else " - Reserved by someone"
-                    lines.append(f"{i + 1}. {txt}{suffix}")
-                wishlist_text = "\n".join(lines) or "No wishlist items"
-                st.download_button(
-                    label="Download wishlist (.txt)",
-                    data=wishlist_text,
-                    file_name=f"wishlist_{recipient}.txt",
-                    mime="text/plain",
-                    key=f"download_wishlist_{user_name}_{recipient}",
-                )
-            except Exception:
-                pass
-
-        for idx, item in enumerate(prefs):
-            text = item.get("text", "")
-            status = item.get("status", "open")
-            marked_by = item.get("marked_by")
-
-            cols = st.columns([6, 2, 2])
-            with cols[0]:
-                label_html = f"{idx + 1}. {text}"
-                if status == "reserved":
-                    badge = "Reserved by you" if marked_by == user_name else "Reserved by someone"
-                    label_html += f' <span class="reserved-badge">{badge}</span>'
-                st.markdown(label_html, unsafe_allow_html=True)
-
-            # Actions
-            # Disable reserve if already reserved by someone else
-            disable_reserve = status == "reserved" and marked_by != user_name
-            disable_unmark = not (status == "reserved" and marked_by == user_name)
-
-            reserve_key = f"reserve_{user_name}_{recipient}_{idx}"
-            clear_key = f"clear_{user_name}_{recipient}_{idx}"
-
-            with cols[1]:
-                # If already reserved by current user, show disabled "Reserved" button
-                if status == "reserved" and marked_by == user_name:
-                    st.button("Reserved", key=reserve_key, disabled=True)
-                elif st.button("Reserve", key=reserve_key, disabled=disable_reserve):
-                    item["status"] = "reserved"
-                    item["marked_by"] = user_name
-                    save_state(state)
-                    _safe_rerun()
-            with cols[2]:
-                if st.button("Unmark", key=clear_key, disabled=disable_unmark):
-                    item["status"] = "open"
-                    item["marked_by"] = None
-                    save_state(state)
-                    _safe_rerun()
-
+        st.markdown('<div class="buying-for">You are buying for: ' + ", ".join(recipients) + "</div>", unsafe_allow_html=True)
         st.write("")
 
-    # Reservation info moved below and hidden behind an expander
-    with st.expander("Info"):
-        st.markdown(
-            """
-            <div class="caption-bg">
-              <ul style="margin:0 0 0.25rem 1rem;">
-                <li><strong>Everything is wired, but no PDFs?</strong> Your extractor might be seeing no usable refs.</li>
-                <li><strong>Confirm custom fields made it into the shaped ticket</strong>
-                  <div><pre style="white-space:pre-wrap; margin:0.25rem 0 0;">
-st.write("DEBUG custom_fields:", shaped.get("custom_fields"))
-st.write("DEBUG custom_fields_raw:", ((shaped.get("kayako") or {}).get("conversation") or {}).get("custom_fields_raw"))
-                  </pre></div>
-                </li>
-                <li><strong>Check detection of GitHub / Jira refs</strong>
-                  <div><pre style="white-space:pre-wrap; margin:0.25rem 0 0;">
-st.write("DEBUG gh_refs:", gh_refs)
-st.write("DEBUG jr_refs:", jr_refs)
-                  </pre></div>
-                </li>
-                <li><strong>GitHub default repo for numeric-only fields</strong> — create <code>config/issues_mappings.json</code> with a product default:
-                  <div><pre style="white-space:pre-wrap; margin:0.25rem 0 0;">
-{
-  "product_default_github": {
-    "YOUR_PRODUCT_SLUG": "your-org/your-repo"
-  },
-  "jira_project_bases": {},
-  "defaults": {}
-}
-                  </pre></div>
-                </li>
-                <li><strong>Jira base URL</strong> — map project keys or set a default:
-                  <div><pre style="white-space:pre-wrap; margin:0.25rem 0 0;">
-{
-  "jira_project_bases": {
-    "ABC": "https://yourcompany.atlassian.net"
-  },
-  "defaults": {
-    "jira_base_url": "https://yourcompany.atlassian.net"
-  }
-}
-                  </pre></div>
-                </li>
-                <li><strong>Auth</strong> — GitHub: <code>GITHUB_TOKEN</code> or <code>GH_TOKEN</code>. Jira: <code>JIRA_BEARER_TOKEN</code> or <code>JIRA_EMAIL</code> + <code>ATLASSIAN_API_TOKEN</code>.</li>
-                <li><strong>Sanity test</strong> — temporarily set <code>shaped["custom_fields"]["GHI issue"] = "1234"</code> (with default repo configured) to verify a PDF is produced.</li>
-              </ul>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
+        for recipient in recipients:
+            header_cols = st.columns([4, 2])
+            with header_cols[0]:
+                st.markdown(f"**{recipient}'s wishlist**")
+            prefs = state["users"].get(recipient, {}).get("preferences") or []
+            if not prefs:
+                st.markdown(
+                    f'<div class="caption-bg small">{recipient} didn\'t add any wishlist item yet. '
+                    f'Use your imagination or contact {recipient}!</div>',
+                    unsafe_allow_html=True,
+                )
+                st.write("")
+                continue
+            with header_cols[1]:
+                try:
+                    lines = []
+                    for i, it in enumerate(prefs):
+                        if not isinstance(it, dict):
+                            continue
+                        txt = (it.get("text") or "").strip()
+                        if not txt:
+                            continue
+                        status = it.get("status", "open")
+                        marked_by = it.get("marked_by")
+                        suffix = ""
+                        if status == "reserved":
+                            suffix = " - Reserved by you" if marked_by == user_name else " - Reserved by someone"
+                        lines.append(f"{i + 1}. {txt}{suffix}")
+                    wishlist_text = "\n".join(lines) or "No wishlist items"
+                    st.download_button(
+                        label="Download wishlist (.txt)",
+                        data=wishlist_text,
+                        file_name=f"wishlist_{recipient}.txt",
+                        mime="text/plain",
+                        key=f"download_wishlist_{user_name}_{recipient}",
+                    )
+                except Exception:
+                    pass
 
-    # Video moved to a dedicated subpage to avoid impacting core page load
-    if CHRISTMAS_CLIP_PATH:
-        st.markdown('<div class="caption-bg"><strong>See how the drawing was made</strong></div>', unsafe_allow_html=True)
-        if st.button("See how the drawing was made", key=f"see_video_{user_name}", use_container_width=True):
-            st.session_state["video_loading"] = True
-            st.session_state["main_view"] = "video"
-            st.session_state["bg_music_on"] = False
-            _safe_rerun()
+            for idx, item in enumerate(prefs):
+                text = item.get("text", "")
+                status = item.get("status", "open")
+                marked_by = item.get("marked_by")
 
-    st.markdown("</div>", unsafe_allow_html=True)
+                cols = st.columns([6, 2, 2])
+                with cols[0]:
+                    label_html = f"{idx + 1}. {text}"
+                    if status == "reserved":
+                        badge = "Reserved by you" if marked_by == user_name else "Reserved by someone"
+                        label_html += f' <span class="reserved-badge">{badge}</span>'
+                    st.markdown(label_html, unsafe_allow_html=True)
+
+                # Actions
+                # Disable reserve if already reserved by someone else
+                disable_reserve = status == "reserved" and marked_by != user_name
+                disable_unmark = not (status == "reserved" and marked_by == user_name)
+
+                reserve_key = f"reserve_{user_name}_{recipient}_{idx}"
+                clear_key = f"clear_{user_name}_{recipient}_{idx}"
+
+                with cols[1]:
+                    # If already reserved by current user, show disabled "Reserved" button
+                    if status == "reserved" and marked_by == user_name:
+                        st.button("Reserved", key=reserve_key, disabled=True)
+                    elif st.button("Reserve", key=reserve_key, disabled=disable_reserve):
+                        item["status"] = "reserved"
+                        item["marked_by"] = user_name
+                        save_state(state)
+                        _safe_rerun()
+                with cols[2]:
+                    if st.button("Unmark", key=clear_key, disabled=disable_unmark):
+                        item["status"] = "open"
+                        item["marked_by"] = None
+                        save_state(state)
+                        _safe_rerun()
+
+            st.write("")
+
+        # Reservation info moved below and hidden behind an expander
+        with st.expander("Info"):
+            st.markdown(
+                """
+                <div class="caption-bg">
+                  <ul style="margin: 0; padding-left: 1.1rem;">
+                    <li>The person whose wishlist you see does not see which specific item was reserved.</li>
+                    <li>Other buyers can see reserved marks to avoid duplicate purchases.</li>
+                    <li>The giftee only sees that some items are reserved, without details.</li>
+                  </ul>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
+        # Video moved to a dedicated subpage to avoid impacting core page load
+        if CHRISTMAS_CLIP_PATH:
+            st.markdown('<div class="caption-bg"><strong>See how the drawing was made</strong></div>', unsafe_allow_html=True)
+            if st.button("See how the drawing was made", key=f"see_video_{user_name}", use_container_width=True):
+                st.session_state["video_loading"] = True
+                st.session_state["main_view"] = "video"
+                st.session_state["bg_music_on"] = False
+                _safe_rerun()
 
 
 def show_video_page() -> None:
@@ -900,52 +887,50 @@ def show_video_page() -> None:
         return
 
     # Center the video inside a nice card, similar to previous styling
-    st.markdown('<div class="christmas-card">', unsafe_allow_html=True)
-    st.markdown('<div class="caption-bg"><strong>See how the drawing was made</strong></div>', unsafe_allow_html=True)
+    with st.container(border=True):
+        st.markdown('<div class="caption-bg"><strong>See how the drawing was made</strong></div>', unsafe_allow_html=True)
 
-    is_loading = bool(st.session_state.pop("video_loading", False))
+        is_loading = bool(st.session_state.pop("video_loading", False))
 
-    def render_video() -> None:
-        try:
-            if video_src.startswith(("http://", "https://", "data:")):
-                st.markdown(
-                    f'<video preload="metadata" controls playsinline '
-                    f'style="width:100%; border-radius:12px; opacity:0.95; box-shadow: 0 8px 24px rgba(0,0,0,0.08);" '
-                    f'src="{video_src}"></video>',
-                    unsafe_allow_html=True,
-                )
-            else:
-                vpath = Path(video_src)
-                if not vpath.exists():
-                    assets = BASE_DIR / "assets"
-                    if assets.exists():
-                        for f in assets.glob("*"):
-                            if f.name.lower() == vpath.name.lower():
-                                vpath = f
-                                break
-                if vpath.exists():
-                    b64 = _read_file_b64(str(vpath)) or ""
-                    if b64:
-                        st.markdown(
-                            f'<video preload="metadata" controls playsinline '
-                            f'style="width:100%; border-radius:12px; opacity:0.95; box-shadow: 0 8px 24px rgba(0,0,0,0.08);" '
-                            f'src="data:video/mp4;base64,{b64}"></video>',
-                            unsafe_allow_html=True,
-                        )
-                    else:
-                        st.video(str(vpath), format="video/mp4")
+        def render_video() -> None:
+            try:
+                if video_src.startswith(("http://", "https://", "data:")):
+                    st.markdown(
+                        f'<video preload="metadata" controls playsinline '
+                        f'style="width:100%; border-radius:12px; opacity:0.95; box-shadow: 0 8px 24px rgba(0,0,0,0.08);" '
+                        f'src="{video_src}"></video>',
+                        unsafe_allow_html=True,
+                    )
                 else:
-                    st.video(video_src, format="video/mp4")
-        except Exception:
-            st.video(video_src, format="video/mp4")
+                    vpath = Path(video_src)
+                    if not vpath.exists():
+                        assets = BASE_DIR / "assets"
+                        if assets.exists():
+                            for f in assets.glob("*"):
+                                if f.name.lower() == vpath.name.lower():
+                                    vpath = f
+                                    break
+                    if vpath.exists():
+                        b64 = _read_file_b64(str(vpath)) or ""
+                        if b64:
+                            st.markdown(
+                                f'<video preload="metadata" controls playsinline '
+                                f'style="width:100%; border-radius:12px; opacity:0.95; box-shadow: 0 8px 24px rgba(0,0,0,0.08);" '
+                                f'src="data:video/mp4;base64,{b64}"></video>',
+                                unsafe_allow_html=True,
+                            )
+                        else:
+                            st.video(str(vpath), format="video/mp4")
+                    else:
+                        st.video(video_src, format="video/mp4")
+            except Exception:
+                st.video(video_src, format="video/mp4")
 
-    if is_loading:
-        with st.spinner("Loading video..."):
+        if is_loading:
+            with st.spinner("Loading video..."):
+                render_video()
+        else:
             render_video()
-    else:
-        render_video()
-
-    st.markdown("</div>", unsafe_allow_html=True)
 
 
 def render_bottom_video_cta(current_user: str | None) -> None:
@@ -954,14 +939,13 @@ def render_bottom_video_cta(current_user: str | None) -> None:
         return
     if not CHRISTMAS_CLIP_PATH:
         return
-    st.markdown('<div class="christmas-card">', unsafe_allow_html=True)
-    st.markdown('<div class="caption-bg small">See how the drawing was made</div>', unsafe_allow_html=True)
-    if st.button("See how the drawing was made", key=f"see_video_cta_{current_user}", use_container_width=True):
-        st.session_state["video_loading"] = True
-        st.session_state["main_view"] = "video"
-        st.session_state["bg_music_on"] = False
-        _safe_rerun()
-    st.markdown("</div>", unsafe_allow_html=True)
+    with st.container(border=True):
+        st.markdown('<div class="caption-bg small">See how the drawing was made</div>', unsafe_allow_html=True)
+        if st.button("See how the drawing was made", key=f"see_video_cta_{current_user}", use_container_width=True):
+            st.session_state["video_loading"] = True
+            st.session_state["main_view"] = "video"
+            st.session_state["bg_music_on"] = False
+            _safe_rerun()
 
 def show_test_panel(state: Dict) -> None:
     """Developer tools only in TEST mode."""
@@ -1036,20 +1020,14 @@ def show_entry_gate() -> bool:
     if st.session_state.get("entered_lodge"):
         return True
 
-    st.markdown(
-        """
-        <div class="christmas-card" style="text-align:center;">
-            <h2 style="margin-bottom: 0.5rem;">Welcome to the Christmas lodge</h2>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-    entered = st.button(
-        "▶ Enter",
-        key="enter_lodge_button",
-        use_container_width=True,
-    )
+    entered = False
+    with st.container(border=True):
+        st.markdown("<h2 style='margin-bottom: 0.5rem; text-align:center;'>Welcome to the Christmas lodge</h2>", unsafe_allow_html=True)
+        entered = st.button(
+            "▶ Enter",
+            key="enter_lodge_button",
+            use_container_width=True,
+        )
 
     if entered:
         # Persist that user has entered and enable background music
@@ -1074,37 +1052,35 @@ def show_home_menu(state: Dict, current_user: str) -> None:
     if "main_view" not in st.session_state:
         st.session_state["main_view"] = "home"
 
-    st.markdown('<div class="christmas-card">', unsafe_allow_html=True)
-    st.subheader("What would you like to do?")
+    with st.container(border=True):
+        st.subheader("What would you like to do?")
 
-    col1, col2 = st.columns(2)
+        col1, col2 = st.columns(2)
 
-    with col1:
-        if st.button("⭐ See who you got", use_container_width=True):
-            st.session_state["main_view"] = "assignment"
-            st.session_state["bg_music_on"] = False
+        with col1:
+            if st.button("⭐ See who you got", use_container_width=True):
+                st.session_state["main_view"] = "assignment"
+                st.session_state["bg_music_on"] = False
 
-    with col2:
-        if st.button("🎁 Edit your wishlist", use_container_width=True):
-            st.session_state["main_view"] = "wishlist"
-            st.session_state["bg_music_on"] = True
+        with col2:
+            if st.button("🎁 Edit your wishlist", use_container_width=True):
+                st.session_state["main_view"] = "wishlist"
+                st.session_state["bg_music_on"] = True
 
-    # Status hint (show once for up to 30 seconds, then never again this session)
-    if state.get("assignments_generated"):
-        dismissed = st.session_state.get("draw_ready_dismissed", False)
-        ts = st.session_state.get("draw_ready_ts")
-        now = time.time()
-        if not dismissed:
-            if ts is None:
-                st.session_state["draw_ready_ts"] = now
-                st.success("The draw is ready. You can see who you got.")
-            else:
-                if (now - ts) <= 30:
+        # Status hint (show once for up to 30 seconds, then never again this session)
+        if state.get("assignments_generated"):
+            dismissed = st.session_state.get("draw_ready_dismissed", False)
+            ts = st.session_state.get("draw_ready_ts")
+            now = time.time()
+            if not dismissed:
+                if ts is None:
+                    st.session_state["draw_ready_ts"] = now
                     st.success("The draw is ready. You can see who you got.")
                 else:
-                    st.session_state["draw_ready_dismissed"] = True
-
-    st.markdown("</div>", unsafe_allow_html=True)
+                    if (now - ts) <= 30:
+                        st.success("The draw is ready. You can see who you got.")
+                    else:
+                        st.session_state["draw_ready_dismissed"] = True
 
 def main() -> None:
     st.set_page_config(
