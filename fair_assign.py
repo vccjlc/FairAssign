@@ -905,7 +905,7 @@ def show_assignment_ui(user_name: str, state: Dict) -> None:
         # Video moved to a dedicated subpage to avoid impacting core page load
         if CHRISTMAS_CLIP_PATH:
             st.markdown('<div class="caption-bg"><strong>See how the drawing was made</strong></div>', unsafe_allow_html=True)
-            if st.button("See how the drawing was made", key=f"see_video_{user_name}", use_container_width=True):
+            if st.button("▶ Play", key=f"see_video_{user_name}", use_container_width=True):
                 # remember where we came from
                 st.session_state["return_view"] = st.session_state.get("main_view", "home")
                 st.session_state["video_loading"] = True
@@ -989,7 +989,7 @@ def render_bottom_video_cta(current_user: str | None) -> None:
         return
     with st.container(border=True):
         st.markdown('<div class="caption-bg small">See how the drawing was made</div>', unsafe_allow_html=True)
-        if st.button("See how the drawing was made", key=f"see_video_cta_{current_user}", use_container_width=True):
+        if st.button("▶ Play", key=f"see_video_cta_{current_user}", use_container_width=True):
             # remember where we came from
             st.session_state["return_view"] = st.session_state.get("main_view", "home")
             st.session_state["video_loading"] = True
