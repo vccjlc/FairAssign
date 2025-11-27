@@ -54,8 +54,8 @@ BACKGROUND_PATH = BASE_DIR / "assets" / "background.png"
 
 CHRISTMAS_CLIP_PATH = os.getenv(
     "CHRISTMAS_CLIP_PATH",
-    # Default to external hosted clip; override via env to use a local file or another URL
-    "https://imgur.com/a/vK3MtjL",
+    # Default to local MP4; override via env to use a different file or URL
+    str(BASE_DIR / "christmas_clip.mp4"),
 )
 
 SANTA_AUDIO_PATH = os.getenv(
@@ -841,50 +841,80 @@ def show_assignment_ui(user_name: str, state: Dict) -> None:
             unsafe_allow_html=True,
         )
 
-    # Video at the bottom: lazy load after list so page is responsive first
+    # Video moved to a dedicated subpage to avoid impacting core page load
     if CHRISTMAS_CLIP_PATH:
-        st.markdown('<div class="caption-bg"><strong>See how the drawing was made:</strong></div>', unsafe_allow_html=True)
-        video_flag_key = f"show_assignment_video_{user_name}"
-        if not st.session_state.get(video_flag_key):
-            if st.button("Load video", key=f"load_video_btn_{user_name}"):
-                st.session_state[video_flag_key] = True
-        if st.session_state.get(video_flag_key):
-            try:
-                vpath = Path(str(CHRISTMAS_CLIP_PATH))
-                src_str = str(CHRISTMAS_CLIP_PATH).strip()
-                if vpath.exists():
-                    b64 = _read_file_b64(str(vpath))
-                    if b64:
-                        st.markdown(
-                            f'<video preload="metadata" controls playsinline style="width:100%; border-radius:12px; opacity:0.85;" src="data:video/mp4;base64,{b64}"></video>',
-                            unsafe_allow_html=True,
-                        )
-                    else:
-                        st.video(CHRISTMAS_CLIP_PATH)
-                else:
-                    # For URLs: if it's a direct .mp4 use <video>, otherwise embed in an iframe
-                    if src_str.lower().endswith(".mp4"):
-                        st.markdown(
-                            f'<video preload="metadata" controls playsinline style="width:100%; border-radius:12px; opacity:0.85;" src="{src_str}"></video>',
-                            unsafe_allow_html=True,
-                        )
-                    else:
-                        # Use provider embed where possible (keeps link hidden)
-                        embed_src = src_str
-                        if "imgur.com" in src_str and "/a/" in src_str:
-                            # Imgur album embed
-                            embed_src = src_str.rstrip("/") + "/embed?pub=true"
-                        st.markdown(
-                            f'<iframe loading="lazy" allow="autoplay; encrypted-media" referrerpolicy="no-referrer" '
-                            f'style="width:100%; height:360px; border:0; border-radius:12px; opacity:0.92;" '
-                            f'src="{embed_src}"></iframe>',
-                            unsafe_allow_html=True,
-                        )
-            except Exception:
-                st.video(CHRISTMAS_CLIP_PATH)
+        st.markdown('<div class="caption-bg"><strong>See how the drawing was made</strong></div>', unsafe_allow_html=True)
+        if st.button("See how the drawing was made", key=f"see_video_{user_name}", use_container_width=True):
+            st.session_state["main_view"] = "video"
+            st.session_state["bg_music_on"] = False
+            _safe_rerun()
 
     st.markdown("</div>", unsafe_allow_html=True)
 
+
+def show_video_page() -> None:
+    """Dedicated subpage that only displays the drawing video in a large frame."""
+    st.session_state["bg_music_on"] = False
+
+    video_src = str(CHRISTMAS_CLIP_PATH or "").strip()
+    if not video_src:
+        st.info("No video configured.")
+        return
+
+    # Maximize the video viewing area similar to the previous fullscreen style
+    st.markdown(
+        """
+        <style>
+        [data-testid="stSidebar"] { display: none !important; }
+        [data-testid="stHeader"] { display: none !important; }
+        .block-container { padding: 0 !important; margin: 0 !important; }
+        .fs-video { width: 100vw; height: 100vh; object-fit: contain; background: #000; }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    try:
+        if video_src.startswith(("http://", "https://", "data:")):
+            st.markdown(
+                f'<video src="{video_src}" class="fs-video" controls playsinline></video>',
+                unsafe_allow_html=True,
+            )
+        else:
+            vpath = Path(video_src)
+            if not vpath.exists():
+                assets = BASE_DIR / "assets"
+                if assets.exists():
+                    for f in assets.glob("*"):
+                        if f.name.lower() == vpath.name.lower():
+                            vpath = f
+                            break
+            if vpath.exists():
+                data = vpath.read_bytes()
+                b64 = base64.b64encode(data).decode()
+                st.markdown(
+                    f'<video class="fs-video" controls playsinline src="data:video/mp4;base64,{b64}"></video>',
+                    unsafe_allow_html=True,
+                )
+            else:
+                st.video(video_src, format="video/mp4")
+    except Exception:
+        st.video(video_src, format="video/mp4")
+
+
+def render_bottom_video_cta(current_user: str | None) -> None:
+    """Render a bottom-of-page CTA to open the video subpage (only when logged in)."""
+    if not current_user:
+        return
+    if not CHRISTMAS_CLIP_PATH:
+        return
+    st.markdown('<div class="christmas-card">', unsafe_allow_html=True)
+    st.markdown('<div class="caption-bg small">See how the drawing was made</div>', unsafe_allow_html=True)
+    if st.button("See how the drawing was made", key=f"see_video_cta_{current_user}", use_container_width=True):
+        st.session_state["main_view"] = "video"
+        st.session_state["bg_music_on"] = False
+        _safe_rerun()
+    st.markdown("</div>", unsafe_allow_html=True)
 
 def show_test_panel(state: Dict) -> None:
     """Developer tools only in TEST mode."""
@@ -1099,6 +1129,14 @@ def main() -> None:
         # Always allow viewing assignment immediately
         st.session_state["bg_music_on"] = False
         show_assignment_ui(current_user, state)
+    elif view == "video":
+        # Dedicated subpage with just the video
+        st.session_state["bg_music_on"] = False
+        show_video_page()
+
+    # Bottom CTA to open the video page (not shown while already on video page)
+    if view != "video":
+        render_bottom_video_cta(current_user)
 
     if APP_MODE == "test":
         show_test_panel(state)
