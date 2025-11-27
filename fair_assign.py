@@ -704,6 +704,17 @@ def show_preferences_ui(user_name: str, state: Dict) -> None:
     with st.container(border=True):
         st.markdown('<div class="caption-bg"><h3 style="margin:0;">Edit your wishlist</h3></div>', unsafe_allow_html=True)
 
+        # --- Back button ---
+        back_target = st.session_state.get("return_view", "home")
+        if st.button("⬅ Back", use_container_width=True):
+            st.session_state["main_view"] = back_target
+            if back_target in ("home", "wishlist"):
+                st.session_state["bg_music_on"] = True
+            else:
+                st.session_state["bg_music_on"] = False
+            st.session_state.pop("return_view", None)
+            _safe_rerun()
+
         # Caution caption if others have reserved/bought items
         any_marked = any(
             isinstance(item, dict)
@@ -768,6 +779,17 @@ def show_assignment_ui(user_name: str, state: Dict) -> None:
 
         # Pause background music while on assignment view
         st.session_state["bg_music_on"] = False
+
+        # --- Back button ---
+        back_target = st.session_state.get("return_view", "home")
+        if st.button("⬅ Back", use_container_width=True):
+            st.session_state["main_view"] = back_target
+            if back_target in ("home", "wishlist"):
+                st.session_state["bg_music_on"] = True
+            else:
+                st.session_state["bg_music_on"] = False
+            st.session_state.pop("return_view", None)
+            _safe_rerun()
 
         recipients = get_recipients_for_giver(state, user_name)
         if not recipients:
