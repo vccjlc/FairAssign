@@ -893,7 +893,7 @@ def show_video_page() -> None:
             if video_src.startswith(("http://", "https://", "data:")):
                 st.markdown(
                     f'<video preload="metadata" controls playsinline '
-                    f'style="width:100%; border-radius:12px; opacity:0.8; box-shadow: 0 8px 24px rgba(0,0,0,0.08);" '
+                    f'style="width:100%; border-radius:12px; opacity:0.5; box-shadow: 0 8px 24px rgba(0,0,0,0.08);" '
                     f'src="{video_src}"></video>',
                     unsafe_allow_html=True,
                 )
