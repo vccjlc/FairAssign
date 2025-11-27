@@ -429,6 +429,104 @@ def render_background_music() -> None:
             st.warning("Background music not available; check SANTA_AUDIO_PATH.")
 
 
+def play_hidden_audio(audio_src: str) -> None:
+    """Best-effort hidden audio playback from local file or URL."""
+    if not audio_src:
+        return
+    try:
+        src_str = str(audio_src)
+        if src_str.startswith(("http://", "https://", "data:")):
+            st.markdown(
+                f'<audio src="{src_str}" autoplay style="display:none"></audio>',
+                unsafe_allow_html=True,
+            )
+            return
+        audio_path = Path(src_str)
+        # Case-insensitive fallback within assets
+        if not audio_path.exists():
+            assets = BASE_DIR / "assets"
+            if assets.exists():
+                for f in assets.glob("*"):
+                    if f.name.lower() == audio_path.name.lower():
+                        audio_path = f
+                        break
+        if audio_path.exists():
+            data = audio_path.read_bytes()
+            b64 = base64.b64encode(data).decode()
+            st.markdown(
+                f'<audio autoplay style="display:none" src="data:audio/mpeg;base64,{b64}"></audio>',
+                unsafe_allow_html=True,
+            )
+        else:
+            st.audio(src_str, format="audio/mp3", start_time=0)
+    except Exception:
+        try:
+            st.audio(audio_src, format="audio/mp3", start_time=0)
+        except Exception:
+            # Swallow error to avoid noisy UI
+            pass
+
+
+def show_fullscreen_clip_once(video_src: str) -> bool:
+    """
+    If the 'show_assignment_clip' flag is set, render a near-fullscreen video
+    and a continue button. Returns True if the function handled the entire
+    screen (caller should return early), False otherwise.
+    """
+    if not st.session_state.pop("show_assignment_clip", False):
+        return False
+
+    if not video_src:
+        return False
+
+    # Hide header and sidebar; expand the video to viewport
+    st.markdown(
+        """
+        <style>
+        [data-testid="stSidebar"] { display: none !important; }
+        [data-testid="stHeader"] { display: none !important; }
+        .block-container { padding: 0 !important; margin: 0 !important; }
+        .fs-video { width: 100vw; height: 100vh; object-fit: cover; }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    try:
+        if str(video_src).startswith(("http://", "https://", "data:")):
+            st.markdown(
+                f'<video src="{video_src}" class="fs-video" autoplay controls playsinline></video>',
+                unsafe_allow_html=True,
+            )
+        else:
+            vpath = Path(video_src)
+            if not vpath.exists():
+                assets = BASE_DIR / "assets"
+                if assets.exists():
+                    for f in assets.glob("*"):
+                        if f.name.lower() == vpath.name.lower():
+                            vpath = f
+                            break
+            if vpath.exists():
+                data = vpath.read_bytes()
+                b64 = base64.b64encode(data).decode()
+                st.markdown(
+                    f'<video class="fs-video" autoplay controls playsinline src="data:video/mp4;base64,{b64}"></video>',
+                    unsafe_allow_html=True,
+                )
+            else:
+                st.video(video_src, format="video/mp4")
+    except Exception:
+        st.video(video_src, format="video/mp4")
+
+    # Show a continue button to proceed to assignment details
+    col = st.container()
+    with col:
+        if st.button("Continue to your draw", use_container_width=True):
+            _safe_rerun()
+    return True
+
+
 def on_wishlist_change(user_name: str, state: Dict) -> None:
     """Autosave wishlist when any input changes."""
     user_state = state["users"][user_name]
@@ -559,28 +657,12 @@ def show_assignment_ui(user_name: str, state: Dict) -> None:
 
     # If requested, play ho-ho-ho once when entering the view
     if st.session_state.pop("play_ho_ho_once", False):
-        try:
-            if str(HO_HO_AUDIO_PATH).startswith(("http://", "https://", "data:")):
-                st.markdown(
-                    f'<audio src="{HO_HO_AUDIO_PATH}" autoplay style="display:none"></audio>',
-                    unsafe_allow_html=True,
-                )
-            else:
-                audio_path = Path(HO_HO_AUDIO_PATH)
-                if audio_path.exists():
-                    data = audio_path.read_bytes()
-                    b64 = base64.b64encode(data).decode()
-                    st.markdown(
-                        f'<audio autoplay style="display:none" src="data:audio/mpeg;base64,{b64}"></audio>',
-                        unsafe_allow_html=True,
-                    )
-                else:
-                    st.audio(HO_HO_AUDIO_PATH, format="audio/mp3", start_time=0)
-        except Exception:
-            try:
-                st.audio(HO_HO_AUDIO_PATH, format="audio/mp3", start_time=0)
-            except Exception:
-                st.warning("Reveal sound not available; check HO_HO_AUDIO_PATH.")
+        play_hidden_audio(HO_HO_AUDIO_PATH)
+
+    # Show fullscreen clip once if requested and stop rendering further until user continues
+    if show_fullscreen_clip_once(CHRISTMAS_CLIP_PATH):
+        st.markdown("</div>", unsafe_allow_html=True)
+        return
 
     recipients = get_recipients_for_giver(state, user_name)
     if not recipients:
@@ -595,7 +677,7 @@ def show_assignment_ui(user_name: str, state: Dict) -> None:
         st.markdown(f"**{recipient}**")
         prefs = state["users"].get(recipient, {}).get("preferences") or []
         if not prefs:
-            st.caption("No wishlist items. Use your imagination!")
+            st.caption(f"{recipient} didn't add any wishlist item yet. Use your imagination or contact {recipient}!")
             st.write("")
             continue
 
@@ -767,6 +849,8 @@ def show_home_menu(state: Dict, current_user: str) -> None:
             st.session_state["main_view"] = "assignment"
             # Play ho-ho-ho when switching to see assignment
             st.session_state["play_ho_ho_once"] = True
+            # Show fullscreen clip once before revealing details
+            st.session_state["show_assignment_clip"] = True
 
     with col2:
         if st.button("🎁 Edit your wishlist", use_container_width=True):
