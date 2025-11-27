@@ -38,10 +38,10 @@ if APP_MODE not in ("test", "prod"):
     APP_MODE = "test"
 
 PARTICIPANTS = [
-    {"name": "Magda", "password": "menel36"},
-    {"name": "Maria", "password": "flanela8"},
-    {"name": "Asia", "password": "pkszubr"},
-    {"name": "Zuza", "password": "alessi5"},
+    {"name": "Magda", "password": "dvorakus"},
+    {"name": "Maria", "password": "kejton"},
+    {"name": "Asia", "password": "zubrol"},
+    {"name": "Zuza", "password": "alessi"},
     {"name": "Jan", "password": "bbbb"},
 ]
 
@@ -940,7 +940,7 @@ def show_video_page() -> None:
             st.video(video_src, format="video/mp4")
 
     if is_loading:
-        with st.spinner("Loading..."):
+        with st.spinner("Loading video..."):
             render_video()
     else:
         render_video()
