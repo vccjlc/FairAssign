@@ -414,9 +414,16 @@ def add_christmas_style() -> None:
     box-shadow: 0 0 0 3px rgba(105,145,255,0.15);
     outline: none;
 }
-.stButton > button:disabled, .stButton > button[disabled], .stButton > button[aria-disabled="true"] {
-    opacity: 1 !important;
+/* Make disabled buttons (Reserved / Unmark) clearly visible */
+.stButton > button:disabled,
+.stButton > button[disabled],
+.stButton > button[aria-disabled="true"] {
+    opacity: 1 !important;              /* no fading */
     filter: none !important;
+    background-color: #111827 !important;  /* dark navy (same as normal button) */
+    color: #ffffff !important;             /* white text */
+    border-color: #111827 !important;
+    cursor: not-allowed !important;        /* still looks disabled */
 }
 .buying-for {
     font-size: 1.25rem;
@@ -850,24 +857,35 @@ def show_assignment_ui(user_name: str, state: Dict) -> None:
 
         # Reservation info moved below and hidden behind an expander
         with st.expander("Info"):
-            st.markdown(
-                """
-                <div class="caption-bg">
-                  <ul style="margin: 0; padding-left: 1.1rem;">
-                    <li>You can mark gifts as reserved and unmark as many times as you want.</li>
-                    <li>Change are visible live.</li>
-                    <li>&lt;user&gt; does not see which specific item was reserved.</li>
-                    <li>Other buyers (if any) can see reserved marks to avoid duplicate purchases.</li>
-                    <li>&lt;user&gt; only sees that some items are reserved, without details.</li>
-                  </ul>
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
+            # Build a readable label for one vs many giftees
+            if len(recipients) == 1:
+                giftee_label = recipients[0]
+                does_verb = "does"
+                sees_verb = "sees"
+            else:
+                giftee_label = "your recipients"
+                does_verb = "do"
+                sees_verb = "see"
+
+            info_html = f"""
+            <div class="caption-bg">
+              <ul style="margin: 0; padding-left: 1.1rem;">
+                <li>You can mark gifts as reserved and unmark as many times as you want.</li>
+                <li>Changes are visible live.</li>
+                <li>{giftee_label} {does_verb} not see which specific item was reserved.</li>
+                <li>Other buyers (if any) can see reserved marks to avoid duplicate purchases.</li>
+                <li>{giftee_label} only {sees_verb} that some items are reserved, without details.</li>
+              </ul>
+            </div>
+            """
+            st.markdown(info_html, unsafe_allow_html=True)
 
         # Video moved to a dedicated subpage to avoid impacting core page load
         if CHRISTMAS_CLIP_PATH:
+            st.markdown('<div class="caption-bg"><strong>See how the drawing was made</strong></div>', unsafe_allow_html=True)
             if st.button("See how the drawing was made", key=f"see_video_{user_name}", use_container_width=True):
+                # remember where we came from
+                st.session_state["return_view"] = st.session_state.get("main_view", "home")
                 st.session_state["video_loading"] = True
                 st.session_state["main_view"] = "video"
                 st.session_state["bg_music_on"] = False
@@ -893,7 +911,7 @@ def show_video_page() -> None:
             if video_src.startswith(("http://", "https://", "data:")):
                 st.markdown(
                     f'<video preload="metadata" controls playsinline '
-                    f'style="width:100%; border-radius:12px; opacity:0.5; box-shadow: 0 8px 24px rgba(0,0,0,0.08);" '
+                    f'style="width:100%; border-radius:12px; opacity:1; box-shadow: 0 8px 24px rgba(0,0,0,0.08);" '
                     f'src="{video_src}"></video>',
                     unsafe_allow_html=True,
                 )
@@ -911,7 +929,7 @@ def show_video_page() -> None:
                     if b64:
                         st.markdown(
                             f'<video preload="metadata" controls playsinline '
-                            f'style="width:100%; border-radius:12px; opacity:0.95; box-shadow: 0 8px 24px rgba(0,0,0,0.08);" '
+                            f'style="width:100%; border-radius:12px; opacity:1; box-shadow: 0 8px 24px rgba(0,0,0,0.08);" '
                             f'src="data:video/mp4;base64,{b64}"></video>',
                             unsafe_allow_html=True,
                         )
@@ -928,6 +946,18 @@ def show_video_page() -> None:
     else:
         render_video()
 
+    # --- Back button ---
+    back_target = st.session_state.get("return_view", "home")
+    if st.button("⬅ Back", use_container_width=True):
+        st.session_state["main_view"] = back_target
+        # resume music only on home / wishlist
+        if back_target in ("home", "wishlist"):
+            st.session_state["bg_music_on"] = True
+        else:
+            st.session_state["bg_music_on"] = False
+        # clean up so the next jump to video can store a fresh origin
+        st.session_state.pop("return_view", None)
+        _safe_rerun()
 
 def render_bottom_video_cta(current_user: str | None) -> None:
     """Render a bottom-of-page CTA to open the video subpage (only when logged in)."""
@@ -938,6 +968,8 @@ def render_bottom_video_cta(current_user: str | None) -> None:
     with st.container(border=True):
         st.markdown('<div class="caption-bg small">See how the drawing was made</div>', unsafe_allow_html=True)
         if st.button("See how the drawing was made", key=f"see_video_cta_{current_user}", use_container_width=True):
+            # remember where we came from
+            st.session_state["return_view"] = st.session_state.get("main_view", "home")
             st.session_state["video_loading"] = True
             st.session_state["main_view"] = "video"
             st.session_state["bg_music_on"] = False
