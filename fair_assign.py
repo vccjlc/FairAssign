@@ -738,24 +738,7 @@ def show_assignment_ui(user_name: str, state: Dict) -> None:
 
     # Shake effect removed per request
 
-    # Show the clip inline within the assignment card (no autoplay), slightly transparent
-    if CHRISTMAS_CLIP_PATH:
-        try:
-            vpath = Path(str(CHRISTMAS_CLIP_PATH))
-            if vpath.exists():
-                data = vpath.read_bytes()
-                b64 = base64.b64encode(data).decode()
-                st.markdown(
-                    f'<video controls playsinline style="width:100%; border-radius:12px; opacity:0.85;" src="data:video/mp4;base64,{b64}"></video>',
-                    unsafe_allow_html=True,
-                )
-            else:
-                st.markdown(
-                    f'<video controls playsinline style="width:100%; border-radius:12px; opacity:0.85;" src="{CHRISTMAS_CLIP_PATH}"></video>',
-                    unsafe_allow_html=True,
-                )
-        except Exception:
-            st.video(CHRISTMAS_CLIP_PATH)
+    # (Video moved to bottom of the card so the list appears immediately)
 
     recipients = get_recipients_for_giver(state, user_name)
     if not recipients:
@@ -853,6 +836,28 @@ def show_assignment_ui(user_name: str, state: Dict) -> None:
             unsafe_allow_html=True,
         )
 
+    # Video at the bottom: loads after the list; slightly transparent
+    if CHRISTMAS_CLIP_PATH:
+        st.markdown('<div class="caption-bg"><strong>How the drawing was made</strong></div>', unsafe_allow_html=True)
+        try:
+            vpath = Path(str(CHRISTMAS_CLIP_PATH))
+            if vpath.exists():
+                b64 = _read_file_b64(str(vpath))
+                if b64:
+                    st.markdown(
+                        f'<video preload="auto" controls playsinline style="width:100%; border-radius:12px; opacity:0.85;" src="data:video/mp4;base64,{b64}"></video>',
+                        unsafe_allow_html=True,
+                    )
+                else:
+                    st.video(CHRISTMAS_CLIP_PATH)
+            else:
+                st.markdown(
+                    f'<video preload="auto" controls playsinline style="width:100%; border-radius:12px; opacity:0.85;" src="{CHRISTMAS_CLIP_PATH}"></video>',
+                    unsafe_allow_html=True,
+                )
+        except Exception:
+            st.video(CHRISTMAS_CLIP_PATH)
+
     st.markdown("</div>", unsafe_allow_html=True)
 
 
@@ -939,7 +944,7 @@ def show_entry_gate() -> bool:
     )
 
     entered = st.button(
-        "▶ Play & enter",
+        "▶ Enter",
         key="enter_lodge_button",
         use_container_width=True,
     )
