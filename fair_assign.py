@@ -62,6 +62,12 @@ SANTA_AUDIO_PATH = os.getenv(
     str(BASE_DIR / "assets" / "intro_jingle.mp3"),
 )
 
+# Audio played when user goes to see their assigned person
+HO_HO_AUDIO_PATH = os.getenv(
+    "HO_HO_AUDIO_PATH",
+    str(BASE_DIR / "assets" / "ho_ho_ho.mp3"),
+)
+
 # Number of recipients assigned to each giver (1 by default; future configurable)
 ASSIGNMENTS_PER_GIVER = int(os.getenv("ASSIGNMENTS_PER_GIVER", "1"))
 
@@ -482,6 +488,31 @@ def show_assignment_ui(user_name: str, state: Dict) -> None:
     st.markdown('<div class="christmas-card">', unsafe_allow_html=True)
     st.subheader("Your Secret Santa draw")
 
+    # If requested, play ho-ho-ho once when entering the view
+    if st.session_state.pop("play_ho_ho_once", False):
+        try:
+            if str(HO_HO_AUDIO_PATH).startswith(("http://", "https://", "data:")):
+                st.markdown(
+                    f'<audio src="{HO_HO_AUDIO_PATH}" autoplay style="display:none"></audio>',
+                    unsafe_allow_html=True,
+                )
+            else:
+                audio_path = Path(HO_HO_AUDIO_PATH)
+                if audio_path.exists():
+                    data = audio_path.read_bytes()
+                    b64 = base64.b64encode(data).decode()
+                    st.markdown(
+                        f'<audio autoplay style="display:none" src="data:audio/mpeg;base64,{b64}"></audio>',
+                        unsafe_allow_html=True,
+                    )
+                else:
+                    st.audio(HO_HO_AUDIO_PATH, format="audio/mp3", start_time=0)
+        except Exception:
+            try:
+                st.audio(HO_HO_AUDIO_PATH, format="audio/mp3", start_time=0)
+            except Exception:
+                st.warning("Reveal sound not available; check HO_HO_AUDIO_PATH.")
+
     recipients = get_recipients_for_giver(state, user_name)
     if not recipients:
         st.info("Assignments are not ready yet. Please check back later.")
@@ -615,6 +646,10 @@ def show_entry_gate() -> bool:
     Returns True if the main UI should continue, False otherwise.
     """
 
+    # If already entered during this session, skip the gate
+    if st.session_state.get("entered_lodge"):
+        return True
+
     st.markdown(
         """
         <div class="christmas-card" style="text-align:center;">
@@ -632,29 +667,10 @@ def show_entry_gate() -> bool:
     )
 
     if entered:
-        # Play intro as background (hidden element) once per click
-        try:
-            if str(SANTA_AUDIO_PATH).startswith(("http://", "https://", "data:")):
-                st.markdown(
-                    f'<audio src="{SANTA_AUDIO_PATH}" autoplay style="display:none"></audio>',
-                    unsafe_allow_html=True,
-                )
-            else:
-                audio_path = Path(SANTA_AUDIO_PATH)
-                if audio_path.exists():
-                    data = audio_path.read_bytes()
-                    b64 = base64.b64encode(data).decode()
-                    st.markdown(
-                        f'<audio autoplay style="display:none" src="data:audio/mpeg;base64,{b64}"></audio>',
-                        unsafe_allow_html=True,
-                    )
-                else:
-                    st.audio(SANTA_AUDIO_PATH, format="audio/mp3", start_time=0)
-        except Exception:
-            try:
-                st.audio(SANTA_AUDIO_PATH, format="audio/mp3", start_time=0)
-            except Exception:
-                st.warning("Intro music not available; check SANTA_AUDIO_PATH.")
+        # Persist that user has entered; schedule intro audio to play on next run
+        st.session_state["entered_lodge"] = True
+        st.session_state["play_intro_audio_once"] = True
+        _safe_rerun()
         return True
 
     return False
@@ -681,6 +697,8 @@ def show_home_menu(state: Dict, current_user: str) -> None:
     with col1:
         if st.button("⭐ See who you got", use_container_width=True):
             st.session_state["main_view"] = "assignment"
+            # Play ho-ho-ho when switching to see assignment
+            st.session_state["play_ho_ho_once"] = True
 
     with col2:
         if st.button("🎁 Edit your wishlist", use_container_width=True):
@@ -703,25 +721,52 @@ def main() -> None:
     )
     add_christmas_style()
 
-    st.markdown('<div class="christmas-title">Fair Assign – Secret Santa</div>', unsafe_allow_html=True)
-    st.markdown(
-        '<div class="christmas-subtitle">'
-        'Shared Christmas wishlist and fair random assignments for our group'
-        "</div>",
-        unsafe_allow_html=True,
-    )
+    # Show the heading and mode only before entering the lodge
+    if not st.session_state.get("entered_lodge"):
+        st.markdown('<div class="christmas-title">Fair Assign – Secret Santa</div>', unsafe_allow_html=True)
+        st.markdown(
+            '<div class="christmas-subtitle">'
+            'Shared Christmas wishlist and fair random assignments for our group'
+            "</div>",
+            unsafe_allow_html=True,
+        )
 
-    st.markdown(
-        f"<p style='text-align:center; color:#ffffff; font-size:0.9rem;'>"
-        f"Current mode: <strong>{APP_MODE.upper()}</strong>"
-        "</p>",
-        unsafe_allow_html=True,
-    )
+        st.markdown(
+            f"<p style='text-align:center; color:#ffffff; font-size:0.9rem;'>"
+            f"Current mode: <strong>{APP_MODE.upper()}</strong>"
+            "</p>",
+            unsafe_allow_html=True,
+        )
 
     # NEW: entry gate with big Play button and intro audio
     if not show_entry_gate():
         # User has not pressed Play yet; do not show login or anything else
         return
+
+    # If requested (from the gate), play intro audio once in the background
+    if st.session_state.pop("play_intro_audio_once", False):
+        try:
+            if str(SANTA_AUDIO_PATH).startswith(("http://", "https://", "data:")):
+                st.markdown(
+                    f'<audio src="{SANTA_AUDIO_PATH}" autoplay style="display:none"></audio>',
+                    unsafe_allow_html=True,
+                )
+            else:
+                audio_path = Path(SANTA_AUDIO_PATH)
+                if audio_path.exists():
+                    data = audio_path.read_bytes()
+                    b64 = base64.b64encode(data).decode()
+                    st.markdown(
+                        f'<audio autoplay style="display:none" src="data:audio/mpeg;base64,{b64}"></audio>',
+                        unsafe_allow_html=True,
+                    )
+                else:
+                    st.audio(SANTA_AUDIO_PATH, format="audio/mp3", start_time=0)
+        except Exception:
+            try:
+                st.audio(SANTA_AUDIO_PATH, format="audio/mp3", start_time=0)
+            except Exception:
+                st.warning("Intro music not available; check SANTA_AUDIO_PATH.")
 
     state = load_state()
 
