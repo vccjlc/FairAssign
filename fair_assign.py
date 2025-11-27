@@ -378,10 +378,12 @@ def add_christmas_style() -> None:
     outline: none;
 }
 .christmas-card .caption-bg {
-    background: #f2f3f7;
+    background: #e9edf5;
     padding: 0.5rem 0.75rem;
     border-radius: 0.5rem;
     margin-bottom: 0.6rem;
+    border: 1px solid #d6dbea;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.03);
 }
 .christmas-card .caption-bg.small {
     font-size: 0.95rem;
@@ -500,6 +502,48 @@ def play_hidden_audio(audio_src: str) -> None:
             # Swallow error to avoid noisy UI
             pass
 
+
+@st.cache_data(show_spinner=False)
+def _read_file_b64(path_str: str) -> str | None:
+    """Read a local file and return base64 string; cached across reruns."""
+    try:
+        p = Path(path_str)
+        if p.exists():
+            data = p.read_bytes()
+            return base64.b64encode(data).decode()
+    except Exception:
+        return None
+    return None
+
+
+def preload_christmas_clip() -> None:
+    """Hint the browser to preload the video once per session to speed up first play."""
+    if st.session_state.get("video_preloaded"):
+        return
+    src = str(CHRISTMAS_CLIP_PATH or "").strip()
+    if not src:
+        return
+    try:
+        # If local file, embed a hidden preloading video via data URL
+        vpath = Path(src)
+        if vpath.exists():
+            b64 = _read_file_b64(src)
+            if b64:
+                st.markdown(
+                    f'<video preload="auto" muted playsinline style="display:none" src="data:video/mp4;base64,{b64}"></video>',
+                    unsafe_allow_html=True,
+                )
+        else:
+            # For URL sources, use preload link and hidden video
+            st.markdown(f'<link rel="preload" as="video" href="{src}">', unsafe_allow_html=True)
+            st.markdown(
+                f'<video preload="auto" muted playsinline style="display:none" src="{src}"></video>',
+                unsafe_allow_html=True,
+            )
+        st.session_state["video_preloaded"] = True
+    except Exception:
+        # Ignore preloading errors
+        pass
 
 def show_fullscreen_clip_once(video_src: str) -> bool:
     """
@@ -689,7 +733,8 @@ def show_assignment_ui(user_name: str, state: Dict) -> None:
     st.markdown('<div class="christmas-card">', unsafe_allow_html=True)
     st.subheader("Your Secret Santa draw")
 
-    # Background music continues during video playback
+    # Pause background music while on assignment view
+    st.session_state["bg_music_on"] = False
 
     # Shake effect removed per request
 
@@ -701,12 +746,12 @@ def show_assignment_ui(user_name: str, state: Dict) -> None:
                 data = vpath.read_bytes()
                 b64 = base64.b64encode(data).decode()
                 st.markdown(
-                    f'<video controls playsinline style="width:100%; border-radius:12px; opacity:0.9;" src="data:video/mp4;base64,{b64}"></video>',
+                    f'<video controls playsinline style="width:100%; border-radius:12px; opacity:0.85;" src="data:video/mp4;base64,{b64}"></video>',
                     unsafe_allow_html=True,
                 )
             else:
                 st.markdown(
-                    f'<video controls playsinline style="width:100%; border-radius:12px; opacity:0.9;" src="{CHRISTMAS_CLIP_PATH}"></video>',
+                    f'<video controls playsinline style="width:100%; border-radius:12px; opacity:0.85;" src="{CHRISTMAS_CLIP_PATH}"></video>',
                     unsafe_allow_html=True,
                 )
         except Exception:
@@ -727,7 +772,11 @@ def show_assignment_ui(user_name: str, state: Dict) -> None:
             st.markdown(f"**{recipient}'s wishlist**")
         prefs = state["users"].get(recipient, {}).get("preferences") or []
         if not prefs:
-            st.caption(f"{recipient} didn't add any wishlist item yet. Use your imagination or contact {recipient}!")
+            st.markdown(
+                f'<div class="caption-bg small">{recipient} didn\'t add any wishlist item yet. '
+                f'Use your imagination or contact {recipient}!</div>',
+                unsafe_allow_html=True,
+            )
             st.write("")
             continue
         with header_cols[1]:
@@ -926,10 +975,12 @@ def show_home_menu(state: Dict, current_user: str) -> None:
     with col1:
         if st.button("⭐ See who you got", use_container_width=True):
             st.session_state["main_view"] = "assignment"
+            st.session_state["bg_music_on"] = False
 
     with col2:
         if st.button("🎁 Edit your wishlist", use_container_width=True):
             st.session_state["main_view"] = "wishlist"
+            st.session_state["bg_music_on"] = True
 
     # Status hint (show once for up to 30 seconds, then never again this session)
     if state.get("assignments_generated"):
@@ -993,6 +1044,9 @@ def main() -> None:
                 show_test_panel(state)
             return
 
+    # Preload the video once to speed up first playback
+    preload_christmas_clip()
+
     # Sidebar user panel
     st.sidebar.write(f"Logged in as: **{current_user}**")
     if st.sidebar.button("Log out"):
@@ -1009,9 +1063,12 @@ def main() -> None:
     view = st.session_state.get("main_view", "home")
 
     if view == "wishlist":
+        # Resume background music on non-video views
+        st.session_state["bg_music_on"] = True
         show_preferences_ui(current_user, state)
     elif view == "assignment":
         # Always allow viewing assignment immediately
+        st.session_state["bg_music_on"] = False
         show_assignment_ui(current_user, state)
 
     if APP_MODE == "test":
