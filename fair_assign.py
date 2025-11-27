@@ -250,44 +250,39 @@ def add_christmas_style() -> None:
         }
         """
 
-    st.markdown(
-        f"""
-        <style>
-        {bg_css}
-        [data-testid="stHeader"] {
-            background-color: rgba(0, 0, 0, 0);
-        }
-        .christmas-card {
-            background-color: #ffffffee;
-            padding: 1.5rem 2rem;
-            border-radius: 1rem;
-            border: 1px solid #eed6d6;
-            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.06);
-            max-width: 640px;
-            margin: 1.5rem auto;
-            color: #111111;
-        }
-        .christmas-title {
-            text-align: center;
-            font-size: 2.1rem;
-            font-weight: 700;
-            color: #ffffff;
-            margin-top: 0.5rem;
-            margin-bottom: 0.2rem;
-        }
-        .christmas-subtitle {
-            text-align: center;
-            font-size: 1rem;
-            color: #ffffff;
-            margin-bottom: 0.8rem;
-        }
-        [data-testid="stCaptionContainer"] p {{
-            color: #ffffff !important;
-        }}
-        </style>
-        """,
-        unsafe_allow_html=True,
-    )
+    css_core = """
+[data-testid="stHeader"] {
+    background-color: rgba(0, 0, 0, 0);
+}
+.christmas-card {
+    background-color: #ffffffee;
+    padding: 1.5rem 2rem;
+    border-radius: 1rem;
+    border: 1px solid #eed6d6;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.06);
+    max-width: 640px;
+    margin: 1.5rem auto;
+    color: #111111;
+}
+.christmas-title {
+    text-align: center;
+    font-size: 2.1rem;
+    font-weight: 700;
+    color: #ffffff;
+    margin-top: 0.5rem;
+    margin-bottom: 0.2rem;
+}
+.christmas-subtitle {
+    text-align: center;
+    font-size: 1rem;
+    color: #ffffff;
+    margin-bottom: 0.8rem;
+}
+[data-testid="stCaptionContainer"] p {
+    color: #ffffff !important;
+}
+"""
+    st.markdown("<style>" + bg_css + css_core + "</style>", unsafe_allow_html=True)
 
 
 def show_login() -> str | None:
@@ -505,11 +500,11 @@ def show_entry_gate() -> bool:
                         )
                     else:
                         # Fall back to visible player if path missing
-                        st.audio(SANTA_AUDIO_PATH, format="audio/mp3", start_time=0, autoplay=True)
+                        st.audio(SANTA_AUDIO_PATH, format="audio/mp3", start_time=0)
             except Exception:
                 # Final fallback
                 try:
-                    st.audio(SANTA_AUDIO_PATH, format="audio/mp3", start_time=0, autoplay=True)
+                    st.audio(SANTA_AUDIO_PATH, format="audio/mp3", start_time=0)
                 except Exception:
                     st.warning("Intro music not available; check SANTA_AUDIO_PATH.")
             st.session_state["intro_audio_played"] = True
@@ -551,10 +546,10 @@ def show_entry_gate() -> bool:
                         unsafe_allow_html=True,
                     )
                 else:
-                    st.audio(SANTA_AUDIO_PATH, format="audio/mp3", start_time=0, autoplay=True)
+                    st.audio(SANTA_AUDIO_PATH, format="audio/mp3", start_time=0)
         except Exception:
             try:
-                st.audio(SANTA_AUDIO_PATH, format="audio/mp3", start_time=0, autoplay=True)
+                st.audio(SANTA_AUDIO_PATH, format="audio/mp3", start_time=0)
             except Exception:
                 st.warning("Intro music not available; check SANTA_AUDIO_PATH.")
         st.session_state["intro_audio_played"] = True
