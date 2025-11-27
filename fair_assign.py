@@ -377,6 +377,29 @@ def add_christmas_style() -> None:
     box-shadow: 0 0 0 3px rgba(105,145,255,0.15);
     outline: none;
 }
+.christmas-card .caption-bg {
+    background: #f2f3f7;
+    padding: 0.5rem 0.75rem;
+    border-radius: 0.5rem;
+    margin-bottom: 0.6rem;
+}
+.christmas-card .caption-bg.small {
+    font-size: 0.95rem;
+}
+.buying-for {
+    font-size: 1.25rem;
+    font-weight: 700;
+    margin: 0.2rem 0 0.6rem;
+}
+.reserved-badge {
+    display: inline-block;
+    background: #2ea043;
+    color: #ffffff;
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: 0.75rem;
+    margin-left: 6px;
+}
 .christmas-title {
     text-align: center;
     font-size: 2.1rem;
@@ -589,17 +612,17 @@ def show_preferences_ui(user_name: str, state: Dict) -> None:
     existing_prefs = user_state.get("preferences") or []
 
     st.markdown('<div class="christmas-card">', unsafe_allow_html=True)
-    st.subheader("Edit your wishlist")
+    st.markdown('<div class="caption-bg"><h3 style="margin:0;">Edit your wishlist</h3></div>', unsafe_allow_html=True)
 
     # Caution caption if others have reserved/bought items
     any_marked = any(
         isinstance(item, dict)
-        and item.get("status") in ("reserved", "bought")
+        and item.get("status") in ("reserved",)
         and item.get("marked_by") != user_name
         for item in existing_prefs
     )
     if any_marked:
-        st.info("Some of your gifts might have been bought! Be careful with editing.")
+        st.info("Some of your gifts might have been reserved! Be careful with editing.")
 
     # Show ephemeral saved caption at the top (visible for ~5s after save)
     ts = st.session_state.get("wishlist_saved_ts")
@@ -610,9 +633,10 @@ def show_preferences_ui(user_name: str, state: Dict) -> None:
         except Exception:
             pass
 
-    st.write(
-        "You can list up to seven ideas. "
-        "Leave fields empty if you prefer to be surprised."
+    st.markdown(
+        '<div class="caption-bg small">You can list up to seven ideas. '
+        'Leave fields empty if you prefer to be surprised.</div>',
+        unsafe_allow_html=True,
     )
 
     # Initialize inputs and autosave on change
@@ -670,54 +694,71 @@ def show_assignment_ui(user_name: str, state: Dict) -> None:
         st.markdown("</div>", unsafe_allow_html=True)
         return
 
-    st.write("You are buying gifts for: " + ", ".join(recipients))
+    st.markdown('<div class="buying-for">You are buying gifts for: ' + ", ".join(recipients) + "</div>", unsafe_allow_html=True)
     st.write("")
 
     for recipient in recipients:
-        st.markdown(f"**{recipient}**")
+        header_cols = st.columns([4, 2])
+        with header_cols[0]:
+            st.markdown(f"**{recipient}**")
         prefs = state["users"].get(recipient, {}).get("preferences") or []
         if not prefs:
             st.caption(f"{recipient} didn't add any wishlist item yet. Use your imagination or contact {recipient}!")
             st.write("")
             continue
+        with header_cols[1]:
+            try:
+                wishlist_text = "\n".join(
+                    f"{i + 1}. {it.get('text','')}"
+                    for i, it in enumerate(prefs)
+                    if isinstance(it, dict) and it.get("text")
+                ) or "No wishlist items"
+                st.download_button(
+                    label="Download wishlist (.txt)",
+                    data=wishlist_text,
+                    file_name=f"wishlist_{recipient}.txt",
+                    mime="text/plain",
+                    key=f"download_wishlist_{user_name}_{recipient}",
+                )
+            except Exception:
+                pass
 
         for idx, item in enumerate(prefs):
             text = item.get("text", "")
             status = item.get("status", "open")
             marked_by = item.get("marked_by")
 
-            cols = st.columns([6, 1.5, 1.5, 1.5])
+            cols = st.columns([6, 2, 2])
             with cols[0]:
-                status_label = ""
+                info_tip = (
+                    f"{recipient} does not see that this gift was reserved. "
+                    f"Other people can see it so they don't buy it a second time. "
+                    f"{recipient} only sees that some items were marked as reserved."
+                )
+                label_html = f"{idx + 1}. {text}"
                 if status == "reserved":
-                    status_label = f" (reserved by {marked_by})" if marked_by else " (reserved)"
-                elif status == "bought":
-                    status_label = f" (bought by {marked_by})" if marked_by else " (bought)"
-                st.write(f"{idx + 1}. {text}{status_label}")
+                    label_html += f' <span class="reserved-badge">Reserved</span> <span title="{info_tip}">ℹ</span>'
+                st.markdown(label_html, unsafe_allow_html=True)
 
             # Actions
-            # Disable marking if already bought by someone else
-            disable_reserve = status == "bought" and marked_by != user_name
-            disable_bought = status == "bought" and marked_by != user_name
+            # Disable reserve if already reserved by someone else
+            disable_reserve = status == "reserved" and marked_by != user_name
+            disable_unmark = not (status == "reserved" and marked_by == user_name)
 
             reserve_key = f"reserve_{user_name}_{recipient}_{idx}"
-            bought_key = f"bought_{user_name}_{recipient}_{idx}"
             clear_key = f"clear_{user_name}_{recipient}_{idx}"
 
             with cols[1]:
-                if st.button("Reserve", key=reserve_key, disabled=disable_reserve):
+                # If already reserved by current user, show disabled "Reserved" button
+                if status == "reserved" and marked_by == user_name:
+                    st.button("Reserved", key=reserve_key, disabled=True)
+                elif st.button("Reserve", key=reserve_key, disabled=disable_reserve):
                     item["status"] = "reserved"
                     item["marked_by"] = user_name
                     save_state(state)
                     _safe_rerun()
             with cols[2]:
-                if st.button("Bought", key=bought_key, disabled=disable_bought):
-                    item["status"] = "bought"
-                    item["marked_by"] = user_name
-                    save_state(state)
-                    _safe_rerun()
-            with cols[3]:
-                if st.button("Unmark", key=clear_key):
+                if st.button("Unmark", key=clear_key, disabled=disable_unmark):
                     item["status"] = "open"
                     item["marked_by"] = None
                     save_state(state)
@@ -856,9 +897,20 @@ def show_home_menu(state: Dict, current_user: str) -> None:
         if st.button("🎁 Edit your wishlist", use_container_width=True):
             st.session_state["main_view"] = "wishlist"
 
-    # Status hint
+    # Status hint (show once for up to 30 seconds, then never again this session)
     if state.get("assignments_generated"):
-        st.success("The draw is ready. You can see who you got.")
+        dismissed = st.session_state.get("draw_ready_dismissed", False)
+        ts = st.session_state.get("draw_ready_ts")
+        now = time.time()
+        if not dismissed:
+            if ts is None:
+                st.session_state["draw_ready_ts"] = now
+                st.success("The draw is ready. You can see who you got.")
+            else:
+                if (now - ts) <= 30:
+                    st.success("The draw is ready. You can see who you got.")
+                else:
+                    st.session_state["draw_ready_dismissed"] = True
 
     st.markdown("</div>", unsafe_allow_html=True)
 
