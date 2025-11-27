@@ -693,13 +693,6 @@ def show_assignment_ui(user_name: str, state: Dict) -> None:
     st.session_state["bg_music_on"] = False
     st.session_state["resume_bg_after_assignment"] = True
 
-    # One-time explanation for what "Reserved" means
-    st.caption(
-        "Note: The person whose wishlist you see does not see which item was reserved. "
-        "Other buyers can see reservations to avoid duplicates. "
-        "The giftee only sees that some items are reserved."
-    )
-
     # One-time shake effect
     if st.session_state.pop("shake_screen", False):
         st.markdown(
@@ -719,12 +712,30 @@ def show_assignment_ui(user_name: str, state: Dict) -> None:
             unsafe_allow_html=True,
         )
 
-    # Show the clip inline within the assignment card (with sound)
+    # Show the clip inline within the assignment card (with sound), autoplay once after click
     if CHRISTMAS_CLIP_PATH:
         try:
-            st.video(CHRISTMAS_CLIP_PATH)
+            if st.session_state.pop("play_assignment_video_once", False):
+                # Best-effort autoplay with sound; hide player when playback ends
+                vpath = Path(str(CHRISTMAS_CLIP_PATH))
+                if vpath.exists():
+                    data = vpath.read_bytes()
+                    b64 = base64.b64encode(data).decode()
+                    st.markdown(
+                        f'<video autoplay controls playsinline onended="this.style.display=\'none\';" style="width:100%; border-radius:12px;" src="data:video/mp4;base64,{b64}"></video>',
+                        unsafe_allow_html=True,
+                    )
+                else:
+                    st.markdown(
+                        f'<video autoplay controls playsinline onended="this.style.display=\'none\';" style="width:100%; border-radius:12px;" src="{CHRISTMAS_CLIP_PATH}"></video>',
+                        unsafe_allow_html=True,
+                    )
         except Exception:
-            pass
+            # Fallback: attempt standard player (no autoplay) once, hide when ended
+            st.markdown(
+                f'<video controls playsinline onended="this.style.display=\'none\';" style="width:100%; border-radius:12px;" src="{CHRISTMAS_CLIP_PATH}"></video>',
+                unsafe_allow_html=True,
+            )
 
     recipients = get_recipients_for_giver(state, user_name)
     if not recipients:
@@ -808,6 +819,14 @@ def show_assignment_ui(user_name: str, state: Dict) -> None:
                     _safe_rerun()
 
         st.write("")
+
+    # Reservation info moved below and hidden behind an expander
+    with st.expander("ℹ"):
+        st.caption(
+            "The person whose wishlist you see does not see which item was reserved. "
+            "Other buyers can see reservations to avoid duplicates. "
+            "The giftee only sees that some items are reserved."
+        )
 
     st.markdown("</div>", unsafe_allow_html=True)
 
@@ -935,6 +954,8 @@ def show_home_menu(state: Dict, current_user: str) -> None:
             st.session_state["bg_music_on"] = False
             st.session_state.pop("bg_music_paused_until", None)
             st.session_state["resume_bg_after_assignment"] = True
+            # Autoplay the assignment video once on entry
+            st.session_state["play_assignment_video_once"] = True
             # Fun effect
             st.session_state["shake_screen"] = True
 
