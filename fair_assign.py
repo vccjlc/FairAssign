@@ -645,8 +645,7 @@ def show_preferences_ui(user_name: str, state: Dict) -> None:
             pass
 
     st.markdown(
-        '<div class="caption-bg small">You can list up to seven ideas. '
-        'Leave fields empty if you prefer to be surprised.</div>',
+        '<div class="caption-bg small">You can list up to seven ideas </div>',
         unsafe_allow_html=True,
     )
 
