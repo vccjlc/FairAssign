@@ -19,6 +19,7 @@ To switch modes:
 """
 
 import json
+import base64
 import os
 import random
 import time
@@ -49,6 +50,7 @@ USER_NAMES = [p["name"] for p in PARTICIPANTS]
 
 # Base directory and media paths
 BASE_DIR = Path(__file__).parent
+BACKGROUND_PATH = BASE_DIR / "assets" / "background.png"
 
 CHRISTMAS_CLIP_PATH = os.getenv(
     "CHRISTMAS_CLIP_PATH",
@@ -220,41 +222,68 @@ def authenticate(name: str, password: str) -> bool:
 
 def add_christmas_style() -> None:
     """Simple Christmas themed background and card styling."""
-    st.markdown(
+    # Try to load background image
+    bg_css = ""
+    try:
+        if BACKGROUND_PATH.exists():
+            with BACKGROUND_PATH.open("rb") as f:
+                data = f.read()
+            encoded = base64.b64encode(data).decode()
+            bg_css = f"""
+        [data-testid="stAppViewContainer"] {{
+            background: url("data:image/png;base64,{encoded}") no-repeat center center fixed;
+            background-size: cover;
+        }}
         """
-        <style>
+        else:
+            # Darker fallback gradient for better contrast with white headings
+            bg_css = """
         [data-testid="stAppViewContainer"] {
-            background: radial-gradient(circle at top, #ffecec, #ffffff);
+            background: radial-gradient(circle at top, #2a2a2a, #000000);
         }
+        """
+    except Exception:
+        # If any error, keep a safe fallback
+        bg_css = """
+        [data-testid="stAppViewContainer"] {
+            background: radial-gradient(circle at top, #2a2a2a, #000000);
+        }
+        """
+
+    st.markdown(
+        f"""
+        <style>
+        {bg_css}
         [data-testid="stHeader"] {
             background-color: rgba(0, 0, 0, 0);
         }
         .christmas-card {
-            background-color: #ffffff;
+            background-color: #ffffffee;
             padding: 1.5rem 2rem;
             border-radius: 1rem;
             border: 1px solid #eed6d6;
             box-shadow: 0 8px 24px rgba(0, 0, 0, 0.06);
             max-width: 640px;
             margin: 1.5rem auto;
+            color: #111111;
         }
         .christmas-title {
             text-align: center;
-            font-size: 2rem;
+            font-size: 2.1rem;
             font-weight: 700;
-            color: #b03030;
+            color: #ffffff;
             margin-top: 0.5rem;
             margin-bottom: 0.2rem;
         }
         .christmas-subtitle {
             text-align: center;
             font-size: 1rem;
-            color: #555;
+            color: #ffffff;
             margin-bottom: 0.8rem;
         }
-        [data-testid="stCaptionContainer"] p {
-            color: #444444 !important;
-        }
+        [data-testid="stCaptionContainer"] p {{
+            color: #ffffff !important;
+        }}
         </style>
         """,
         unsafe_allow_html=True,
@@ -459,15 +488,30 @@ def show_entry_gate() -> bool:
     if st.session_state.get("entered_lodge"):
         if SANTA_AUDIO_PATH and not st.session_state.get("intro_audio_played"):
             try:
-                # autoplay=True is supported; browser may still block it but we request it
-                st.audio(
-                    SANTA_AUDIO_PATH,
-                    format="audio/mp3",
-                    start_time=0,
-                    autoplay=True,
-                )
+                # Prefer hidden HTML audio so no bar is visible
+                if str(SANTA_AUDIO_PATH).startswith(("http://", "https://", "data:")):
+                    st.markdown(
+                        f'<audio src="{SANTA_AUDIO_PATH}" autoplay style="display:none"></audio>',
+                        unsafe_allow_html=True,
+                    )
+                else:
+                    audio_path = Path(SANTA_AUDIO_PATH)
+                    if audio_path.exists():
+                        data = audio_path.read_bytes()
+                        b64 = base64.b64encode(data).decode()
+                        st.markdown(
+                            f'<audio autoplay style="display:none" src="data:audio/mpeg;base64,{b64}"></audio>',
+                            unsafe_allow_html=True,
+                        )
+                    else:
+                        # Fall back to visible player if path missing
+                        st.audio(SANTA_AUDIO_PATH, format="audio/mp3", start_time=0, autoplay=True)
             except Exception:
-                st.warning("Intro music not available; check SANTA_AUDIO_PATH.")
+                # Final fallback
+                try:
+                    st.audio(SANTA_AUDIO_PATH, format="audio/mp3", start_time=0, autoplay=True)
+                except Exception:
+                    st.warning("Intro music not available; check SANTA_AUDIO_PATH.")
             st.session_state["intro_audio_played"] = True
         return True
 
@@ -490,8 +534,32 @@ def show_entry_gate() -> bool:
 
     if entered:
         st.session_state["entered_lodge"] = True
-        # Trigger full rerun; next time we will be in the 'already entered' branch
-        st.rerun()
+        # Play immediately, without visible controls
+        try:
+            if str(SANTA_AUDIO_PATH).startswith(("http://", "https://", "data:")):
+                st.markdown(
+                    f'<audio src="{SANTA_AUDIO_PATH}" autoplay style="display:none"></audio>',
+                    unsafe_allow_html=True,
+                )
+            else:
+                audio_path = Path(SANTA_AUDIO_PATH)
+                if audio_path.exists():
+                    data = audio_path.read_bytes()
+                    b64 = base64.b64encode(data).decode()
+                    st.markdown(
+                        f'<audio autoplay style="display:none" src="data:audio/mpeg;base64,{b64}"></audio>',
+                        unsafe_allow_html=True,
+                    )
+                else:
+                    st.audio(SANTA_AUDIO_PATH, format="audio/mp3", start_time=0, autoplay=True)
+        except Exception:
+            try:
+                st.audio(SANTA_AUDIO_PATH, format="audio/mp3", start_time=0, autoplay=True)
+            except Exception:
+                st.warning("Intro music not available; check SANTA_AUDIO_PATH.")
+        st.session_state["intro_audio_played"] = True
+        # Continue without forcing a rerun
+        return True
 
     return False
 
@@ -511,7 +579,7 @@ def main() -> None:
     )
 
     st.markdown(
-        f"<p style='text-align:center; color:#444; font-size:0.9rem;'>"
+        f"<p style='text-align:center; color:#ffffff; font-size:0.9rem;'>"
         f"Current mode: <strong>{APP_MODE.upper()}</strong>"
         "</p>",
         unsafe_allow_html=True,
