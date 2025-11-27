@@ -359,6 +359,19 @@ def add_christmas_style() -> None:
     margin: 1.5rem auto;
     color: #111111;
 }
+.christmas-card input[type="text"] {
+    background-color: #f7f7fb;
+    color: #222222;
+    border: 1px solid #e7e7ef;
+}
+.christmas-card input[type="text"]::placeholder {
+    color: #9aa1b0;
+}
+.christmas-card input[type="text"]:focus {
+    border-color: #d0d6f0;
+    box-shadow: 0 0 0 3px rgba(105,145,255,0.15);
+    outline: none;
+}
 .christmas-title {
     text-align: center;
     font-size: 2.1rem;
@@ -378,6 +391,37 @@ def add_christmas_style() -> None:
 }
 """
     st.markdown("<style>" + bg_css + css_core + "</style>", unsafe_allow_html=True)
+
+
+def render_background_music() -> None:
+    """Render looping background music if enabled."""
+    if not st.session_state.get("bg_music_on"):
+        return
+    if not SANTA_AUDIO_PATH:
+        return
+    try:
+        if str(SANTA_AUDIO_PATH).startswith(("http://", "https://", "data:")):
+            st.markdown(
+                f'<audio src="{SANTA_AUDIO_PATH}" autoplay loop style="display:none"></audio>',
+                unsafe_allow_html=True,
+            )
+        else:
+            audio_path = Path(SANTA_AUDIO_PATH)
+            if audio_path.exists():
+                data = audio_path.read_bytes()
+                b64 = base64.b64encode(data).decode()
+                st.markdown(
+                    f'<audio autoplay loop style="display:none" src="data:audio/mpeg;base64,{b64}"></audio>',
+                    unsafe_allow_html=True,
+                )
+            else:
+                # Fallback to visible player if path missing
+                st.audio(SANTA_AUDIO_PATH, format="audio/mp3", start_time=0)
+    except Exception:
+        try:
+            st.audio(SANTA_AUDIO_PATH, format="audio/mp3", start_time=0)
+        except Exception:
+            st.warning("Background music not available; check SANTA_AUDIO_PATH.")
 
 
 def on_wishlist_change(user_name: str, state: Dict) -> None:
@@ -403,7 +447,14 @@ def on_wishlist_change(user_name: str, state: Dict) -> None:
     user_state["preferences"] = new_items
     user_state["confirmed"] = bool(new_items)
     save_state(state)
-    st.session_state["wishlist_saved_flag"] = True
+    st.session_state["wishlist_saved_ts"] = time.time()
+    # Ephemeral toast if available
+    toast_fn = getattr(st, "toast", None)
+    if callable(toast_fn):
+        try:
+            toast_fn("Wishlist saved", icon="✅")
+        except Exception:
+            pass
 
 
 def show_login() -> str | None:
@@ -447,6 +498,15 @@ def show_preferences_ui(user_name: str, state: Dict) -> None:
     if any_marked:
         st.info("Some of your gifts might have been bought! Be careful with editing.")
 
+    # Show ephemeral saved caption at the top (visible for ~5s after save)
+    ts = st.session_state.get("wishlist_saved_ts")
+    if ts is not None:
+        try:
+            if (time.time() - ts) <= 5:
+                st.caption("✓ Wishlist saved")
+        except Exception:
+            pass
+
     st.write(
         "You can list up to seven ideas. "
         "Leave fields empty if you prefer to be surprised."
@@ -465,10 +525,14 @@ def show_preferences_ui(user_name: str, state: Dict) -> None:
             args=(user_name, state),
         )
 
-    if st.session_state.get("wishlist_saved_flag"):
-        st.caption("✓ Wishlist saved")
-        # Clear the flag so it shows only once per change cycle
-        st.session_state["wishlist_saved_flag"] = False
+    # Repeat the ephemeral saved caption at the bottom
+    ts = st.session_state.get("wishlist_saved_ts")
+    if ts is not None:
+        try:
+            if (time.time() - ts) <= 5:
+                st.caption("✓ Wishlist saved")
+        except Exception:
+            pass
 
     completed = sum(1 for u in state["users"].values() if u.get("confirmed"))
     total = len(state["users"])
@@ -654,7 +718,6 @@ def show_entry_gate() -> bool:
         """
         <div class="christmas-card" style="text-align:center;">
             <h2 style="margin-bottom: 0.5rem;">Welcome to the Christmas lodge</h2>
-            <p style="margin-bottom: 1rem;">Press play to enter</p>
         </div>
         """,
         unsafe_allow_html=True,
@@ -667,9 +730,9 @@ def show_entry_gate() -> bool:
     )
 
     if entered:
-        # Persist that user has entered; schedule intro audio to play on next run
+        # Persist that user has entered and enable background music
         st.session_state["entered_lodge"] = True
-        st.session_state["play_intro_audio_once"] = True
+        st.session_state["bg_music_on"] = True
         _safe_rerun()
         return True
 
@@ -705,11 +768,7 @@ def show_home_menu(state: Dict, current_user: str) -> None:
             st.session_state["main_view"] = "wishlist"
 
     # Status hint
-    if not state.get("assignments_generated"):
-        st.info(
-            "The draw is ready and was generated at app start."
-        )
-    else:
+    if state.get("assignments_generated"):
         st.success("The draw is ready. You can see who you got.")
 
     st.markdown("</div>", unsafe_allow_html=True)
@@ -726,7 +785,7 @@ def main() -> None:
         st.markdown('<div class="christmas-title">Fair Assign – Secret Santa</div>', unsafe_allow_html=True)
         st.markdown(
             '<div class="christmas-subtitle">'
-            'Shared Christmas wishlist and fair random assignments for our group'
+            'Shared Christmas wishlist with random assignments'
             "</div>",
             unsafe_allow_html=True,
         )
@@ -743,30 +802,8 @@ def main() -> None:
         # User has not pressed Play yet; do not show login or anything else
         return
 
-    # If requested (from the gate), play intro audio once in the background
-    if st.session_state.pop("play_intro_audio_once", False):
-        try:
-            if str(SANTA_AUDIO_PATH).startswith(("http://", "https://", "data:")):
-                st.markdown(
-                    f'<audio src="{SANTA_AUDIO_PATH}" autoplay style="display:none"></audio>',
-                    unsafe_allow_html=True,
-                )
-            else:
-                audio_path = Path(SANTA_AUDIO_PATH)
-                if audio_path.exists():
-                    data = audio_path.read_bytes()
-                    b64 = base64.b64encode(data).decode()
-                    st.markdown(
-                        f'<audio autoplay style="display:none" src="data:audio/mpeg;base64,{b64}"></audio>',
-                        unsafe_allow_html=True,
-                    )
-                else:
-                    st.audio(SANTA_AUDIO_PATH, format="audio/mp3", start_time=0)
-        except Exception:
-            try:
-                st.audio(SANTA_AUDIO_PATH, format="audio/mp3", start_time=0)
-            except Exception:
-                st.warning("Intro music not available; check SANTA_AUDIO_PATH.")
+    # Render background music (looping) if enabled
+    render_background_music()
 
     state = load_state()
 
