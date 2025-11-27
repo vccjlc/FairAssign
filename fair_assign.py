@@ -62,6 +62,9 @@ SANTA_AUDIO_PATH = os.getenv(
     str(BASE_DIR / "assets" / "intro_jingle.mp3"),
 )
 
+# Number of recipients assigned to each giver (1 by default; future configurable)
+ASSIGNMENTS_PER_GIVER = int(os.getenv("ASSIGNMENTS_PER_GIVER", "1"))
+
 STATE_FILE = Path(f"fair_assign_state_{APP_MODE}.json")
 
 
@@ -83,15 +86,16 @@ def init_state() -> Dict:
     return {
         "users": {
             name: {
-                "preferences": [],
+                "preferences": [],  # list[{"text": str, "status": "open"|"reserved"|"bought", "marked_by": Optional[str]}]
                 "confirmed": False,
                 "result_revealed": False,
             }
             for name in USER_NAMES
         },
-        # Pre-generate a derangement early; it will be finalized later
-        "assignments": generate_derangement(USER_NAMES),
-        "assignments_generated": False,
+        # Generate assignments once at app start
+        # Mapping: giver -> list of recipients
+        "assignments": {giver: recips for giver, recips in generate_assignments(USER_NAMES, ASSIGNMENTS_PER_GIVER).items()},
+        "assignments_generated": True,
     }
 
 
@@ -129,7 +133,7 @@ def load_state() -> Dict:
         state["assignments"] = {}
         changed = True
     if "assignments_generated" not in state:
-        state["assignments_generated"] = False
+        state["assignments_generated"] = True
         changed = True
 
     # Ensure all participants exist and have expected fields
@@ -143,8 +147,27 @@ def load_state() -> Dict:
             changed = True
         else:
             u = state["users"][name]
-            if "preferences" not in u:
+            # Normalize preferences into structured list
+            if "preferences" not in u or not isinstance(u["preferences"], list):
                 u["preferences"] = []
+                changed = True
+            # Migrate legacy string lists to structured dict entries
+            migrated_prefs = []
+            for item in u.get("preferences", []):
+                if isinstance(item, str):
+                    text = item.strip()
+                    if text:
+                        migrated_prefs.append({"text": text, "status": "open", "marked_by": None})
+                elif isinstance(item, dict):
+                    text = (item.get("text") or "").strip()
+                    status = item.get("status") or "open"
+                    marked_by = item.get("marked_by")
+                    if text:
+                        if status not in ("open", "reserved", "bought"):
+                            status = "open"
+                        migrated_prefs.append({"text": text, "status": status, "marked_by": marked_by})
+            if migrated_prefs != u.get("preferences"):
+                u["preferences"] = migrated_prefs
                 changed = True
             if "confirmed" not in u:
                 u["confirmed"] = False
@@ -159,10 +182,18 @@ def load_state() -> Dict:
             del state["users"][name]
             changed = True
 
-    # Validate or (re)create a pre-generated derangement if needed
-    if not is_valid_derangement(state.get("assignments", {}), USER_NAMES):
-        state["assignments"] = generate_derangement(USER_NAMES)
+    # Validate or (re)create assignments if needed
+    assignments = state.get("assignments", {})
+    # Convert legacy mapping of giver -> single recipient into list form
+    legacy_detected = False
+    if isinstance(assignments, dict) and assignments and all(isinstance(v, str) for v in assignments.values()):
+        assignments = {giver: [recipient] for giver, recipient in assignments.items()}
+        legacy_detected = True
+    if legacy_detected or not is_valid_assignments(assignments, USER_NAMES):
+        state["assignments"] = generate_assignments(USER_NAMES, ASSIGNMENTS_PER_GIVER)
         changed = True
+    else:
+        state["assignments"] = assignments
 
     if changed:
         save_state(state)
@@ -200,13 +231,71 @@ def is_valid_derangement(mapping: Dict[str, str], names: List[str]) -> bool:
             return False
     return True
 
+def is_valid_assignments(mapping: Dict[str, List[str]], names: List[str]) -> bool:
+    """Validate mapping giver -> list of recipients (no self-assignments)."""
+    if not isinstance(mapping, dict):
+        return False
+    if set(mapping.keys()) != set(names):
+        return False
+    for giver, recipients in mapping.items():
+        if not isinstance(recipients, list):
+            return False
+        # Allow duplicates across givers, but not within the same giver and not self
+        seen = set()
+        for r in recipients:
+            if r == giver or r not in names:
+                return False
+            if r in seen:
+                return False
+            seen.add(r)
+    return True
+
+def generate_assignments(names: List[str], recipients_per_giver: int) -> Dict[str, List[str]]:
+    """
+    Generate mapping giver -> list of recipients.
+    - For 1 recipient per giver, produce a derangement.
+    - For k>1, generate k independent derangements and combine per giver (deduped).
+    """
+    if recipients_per_giver <= 1:
+        single = generate_derangement(names)
+        return {giver: [recipient] for giver, recipient in single.items()}
+
+    # For k>1, stack k derangements and combine
+    combined: Dict[str, List[str]] = {n: [] for n in names}
+    attempts = 0
+    while any(len(v) < recipients_per_giver for v in combined.values()):
+        attempts += 1
+        if attempts > 5000:
+            # Fallback: reset and try again (very unlikely for small N)
+            combined = {n: [] for n in names}
+            attempts = 0
+        d = generate_derangement(names)
+        for giver, recipient in d.items():
+            lst = combined[giver]
+            if recipient not in lst and len(lst) < recipients_per_giver:
+                lst.append(recipient)
+    return combined
+
+def get_recipients_for_giver(state: Dict, giver: str) -> List[str]:
+    """Return the list of recipients assigned to the given user."""
+    assignments = state.get("assignments", {}) or {}
+    recipients = assignments.get(giver) or []
+    # Normalize string -> list if any legacy remains
+    if isinstance(recipients, str):
+        return [recipients]
+    if not isinstance(recipients, list):
+        return []
+    return recipients
+
 
 def ensure_assignments(state: Dict) -> None:
-    """Generate assignments once all users have confirmed."""
-    if not state["assignments_generated"] and all_users_confirmed(state):
-        # Keep the pre-generated mapping if valid; otherwise create one now
-        if not is_valid_derangement(state.get("assignments", {}), USER_NAMES):
-            state["assignments"] = generate_derangement(USER_NAMES)
+    """Ensure assignments exist and are valid. In this simplified model, they are generated at startup."""
+    assignments = state.get("assignments", {})
+    # Normalize legacy form if necessary
+    if isinstance(assignments, dict) and assignments and all(isinstance(v, str) for v in assignments.values()):
+        assignments = {g: [r] for g, r in assignments.items()}
+    if not is_valid_assignments(assignments, USER_NAMES):
+        state["assignments"] = generate_assignments(USER_NAMES, ASSIGNMENTS_PER_GIVER)
         state["assignments_generated"] = True
         save_state(state)
 
@@ -285,6 +374,32 @@ def add_christmas_style() -> None:
     st.markdown("<style>" + bg_css + css_core + "</style>", unsafe_allow_html=True)
 
 
+def on_wishlist_change(user_name: str, state: Dict) -> None:
+    """Autosave wishlist when any input changes."""
+    user_state = state["users"][user_name]
+    existing_items = user_state.get("preferences") or []
+
+    # Build new list from inputs, preserving status for unchanged texts
+    existing_by_text = {item["text"]: item for item in existing_items if isinstance(item, dict) and "text" in item}
+
+    new_items: List[Dict] = []
+    for i in range(7):
+        key = f"wishlist_input_{user_name}_{i}"
+        raw = st.session_state.get(key, "")
+        value = (raw or "").strip()
+        if value:
+            prev = existing_by_text.get(value)
+            if prev:
+                new_items.append({"text": value, "status": prev.get("status", "open"), "marked_by": prev.get("marked_by")})
+            else:
+                new_items.append({"text": value, "status": "open", "marked_by": None})
+
+    user_state["preferences"] = new_items
+    user_state["confirmed"] = bool(new_items)
+    save_state(state)
+    st.session_state["wishlist_saved_flag"] = True
+
+
 def show_login() -> str | None:
     """Show login form and return the authenticated user name, or None."""
     st.markdown('<div class="christmas-card">', unsafe_allow_html=True)
@@ -316,33 +431,38 @@ def show_preferences_ui(user_name: str, state: Dict) -> None:
     st.markdown('<div class="christmas-card">', unsafe_allow_html=True)
     st.subheader("Your Christmas wishlist")
 
+    # Caution caption if others have reserved/bought items
+    any_marked = any(
+        isinstance(item, dict)
+        and item.get("status") in ("reserved", "bought")
+        and item.get("marked_by") != user_name
+        for item in existing_prefs
+    )
+    if any_marked:
+        st.info("Some of your gifts might have been bought! Be careful with editing.")
+
     st.write(
         "You can list up to seven ideas. "
         "Leave fields empty if you prefer to be surprised."
     )
 
-    with st.form("wishlist_form"):
-        new_prefs: List[str] = []
-        for i in range(7):
-            default_value = existing_prefs[i] if i < len(existing_prefs) else ""
-            value = st.text_input(
-                f"Gift idea {i + 1}",
-                value=default_value,
-                key=f"pref_{user_name}_{i}",
-            )
-            value = value.strip()
-            if value:
-                new_prefs.append(value)
-
-        submitted = st.form_submit_button("Save my wishlist")
-
-    if submitted:
-        user_state["preferences"] = new_prefs
-        user_state["confirmed"] = True
-        save_state(state)
-        st.success(
-            "Wishlist saved. You can log in again later to update it until everyone is done."
+    # Initialize inputs and autosave on change
+    for i in range(7):
+        default_value = ""
+        if i < len(existing_prefs) and isinstance(existing_prefs[i], dict):
+            default_value = existing_prefs[i].get("text", "")
+        st.text_input(
+            f"Gift idea {i + 1}",
+            value=default_value,
+            key=f"wishlist_input_{user_name}_{i}",
+            on_change=on_wishlist_change,
+            args=(user_name, state),
         )
+
+    if st.session_state.get("wishlist_saved_flag"):
+        st.caption("✓ Wishlist saved")
+        # Clear the flag so it shows only once per change cycle
+        st.session_state["wishlist_saved_flag"] = False
 
     completed = sum(1 for u in state["users"].values() if u.get("confirmed"))
     total = len(state["users"])
@@ -358,65 +478,70 @@ def show_preferences_ui(user_name: str, state: Dict) -> None:
 
 
 def show_assignment_ui(user_name: str, state: Dict) -> None:
-    """Page where a user sees their final assignment."""
-    user_state = state["users"][user_name]
-    assignments = state.get("assignments", {})
-    recipient = assignments.get(user_name)
-
+    """Page where a user sees their final assignment and can mark items reserved/bought."""
     st.markdown('<div class="christmas-card">', unsafe_allow_html=True)
     st.subheader("Your Secret Santa draw")
 
-    if not recipient:
-        st.error("Assignments are not ready yet. Please check back later.")
+    recipients = get_recipients_for_giver(state, user_name)
+    if not recipients:
+        st.info("Assignments are not ready yet. Please check back later.")
         st.markdown("</div>", unsafe_allow_html=True)
         return
 
-    st.write(
-        "Enjoy a short Christmas clip while the magic randomizer works in the background."
-    )
+    st.write("You are buying gifts for: " + ", ".join(recipients))
+    st.write("")
 
-    if CHRISTMAS_CLIP_PATH:
-        try:
-            st.video(CHRISTMAS_CLIP_PATH)
-        except Exception:
-            st.warning(
-                "Christmas clip is not configured correctly. "
-                "Place a video file next to this script and set CHRISTMAS_CLIP_PATH."
-            )
-    else:
-        st.warning("No Christmas clip configured yet.")
-
-    st.caption("Randomly selecting your Christmas giftee")
-
-    already_revealed = bool(user_state.get("result_revealed"))
-    clicked = False
-
-    if not already_revealed:
-        clicked = st.button("Reveal who I am buying a gift for")
-
-        if clicked:
-            with st.spinner("Shuffling names"):
-                time.sleep(1.5)
-            user_state["result_revealed"] = True
-            save_state(state)
-            already_revealed = True
-
-    if already_revealed:
-        st.success(f"You are buying a gift for: {recipient}")
+    for recipient in recipients:
+        st.markdown(f"**{recipient}**")
         prefs = state["users"].get(recipient, {}).get("preferences") or []
-        if prefs:
+        if not prefs:
+            st.caption("No wishlist items. Use your imagination!")
             st.write("")
-            st.write("Their wishlist:")
-            for idx, item in enumerate(prefs, 1):
-                st.write(f"{idx}. {item}")
-        else:
-            st.write("")
-            st.write(
-                "They did not provide any wishlist items. "
-                "Total creative freedom for you."
-            )
-    else:
-        st.info("Press the button when you are ready to reveal your assignment.")
+            continue
+
+        for idx, item in enumerate(prefs):
+            text = item.get("text", "")
+            status = item.get("status", "open")
+            marked_by = item.get("marked_by")
+
+            cols = st.columns([6, 1.5, 1.5, 1.5])
+            with cols[0]:
+                status_label = ""
+                if status == "reserved":
+                    status_label = f" (reserved by {marked_by})" if marked_by else " (reserved)"
+                elif status == "bought":
+                    status_label = f" (bought by {marked_by})" if marked_by else " (bought)"
+                st.write(f"{idx + 1}. {text}{status_label}")
+
+            # Actions
+            # Disable marking if already bought by someone else
+            disable_reserve = status == "bought" and marked_by != user_name
+            disable_bought = status == "bought" and marked_by != user_name
+
+            reserve_key = f"reserve_{user_name}_{recipient}_{idx}"
+            bought_key = f"bought_{user_name}_{recipient}_{idx}"
+            clear_key = f"clear_{user_name}_{recipient}_{idx}"
+
+            with cols[1]:
+                if st.button("Reserve", key=reserve_key, disabled=disable_reserve):
+                    item["status"] = "reserved"
+                    item["marked_by"] = user_name
+                    save_state(state)
+                    _safe_rerun()
+            with cols[2]:
+                if st.button("Bought", key=bought_key, disabled=disable_bought):
+                    item["status"] = "bought"
+                    item["marked_by"] = user_name
+                    save_state(state)
+                    _safe_rerun()
+            with cols[3]:
+                if st.button("Unmark", key=clear_key):
+                    item["status"] = "open"
+                    item["marked_by"] = None
+                    save_state(state)
+                    _safe_rerun()
+
+        st.write("")
 
     st.markdown("</div>", unsafe_allow_html=True)
 
@@ -436,15 +561,19 @@ def show_test_panel(state: Dict) -> None:
             else "**Assignments (current draft)**"
         )
         st.sidebar.markdown(header)
-        for giver, receiver in state["assignments"].items():
-            st.sidebar.write(f"{giver} → {receiver}")
+        for giver, recipients in state["assignments"].items():
+            if isinstance(recipients, list):
+                st.sidebar.write(f"{giver} → {', '.join(recipients)}")
+            else:
+                st.sidebar.write(f"{giver} → {recipients}")
 
-    # Allow regenerating draft assignments before finalization
-    if not state.get("assignments_generated"):
-        if st.sidebar.button("Regenerate draft assignments"):
-            state["assignments"] = generate_derangement(USER_NAMES)
+    # Allow regenerating assignments anytime in test mode
+    if APP_MODE == "test":
+        if st.sidebar.button("Regenerate assignments"):
+            state["assignments"] = generate_assignments(USER_NAMES, ASSIGNMENTS_PER_GIVER)
+            state["assignments_generated"] = True
             save_state(state)
-            st.sidebar.success("Draft assignments regenerated.")
+            st.sidebar.success("Assignments regenerated.")
 
     with st.sidebar.expander("User details and wishlists", expanded=False):
         for name, u in state["users"].items():
@@ -456,7 +585,15 @@ def show_test_panel(state: Dict) -> None:
             prefs = u.get("preferences") or []
             if prefs:
                 for idx, item in enumerate(prefs, 1):
-                    st.write(f"{idx}. {item}")
+                    if isinstance(item, dict):
+                        suffix = ""
+                        if item.get("status") == "reserved":
+                            suffix = f" (reserved by {item.get('marked_by')})"
+                        elif item.get("status") == "bought":
+                            suffix = f" (bought by {item.get('marked_by')})"
+                        st.write(f"{idx}. {item.get('text', '')}{suffix}")
+                    else:
+                        st.write(f"{idx}. {item}")
             else:
                 st.write("no wishlist items")
             st.write("")
@@ -474,43 +611,10 @@ def show_test_panel(state: Dict) -> None:
 
 def show_entry_gate() -> bool:
     """
-    Show a big 'Play & enter' button the first time.
-    After the user clicks it, play intro audio once and let the rest of the app render.
-    Returns True if the main UI should continue, False if we should stop after the gate.
+    Always show a big Play button. When clicked, start background audio for this session and continue.
+    Returns True if the main UI should continue, False otherwise.
     """
 
-    # If the user has already entered, play audio once (if available) and continue
-    if st.session_state.get("entered_lodge"):
-        if SANTA_AUDIO_PATH and not st.session_state.get("intro_audio_played"):
-            try:
-                # Prefer hidden HTML audio so no bar is visible
-                if str(SANTA_AUDIO_PATH).startswith(("http://", "https://", "data:")):
-                    st.markdown(
-                        f'<audio src="{SANTA_AUDIO_PATH}" autoplay style="display:none"></audio>',
-                        unsafe_allow_html=True,
-                    )
-                else:
-                    audio_path = Path(SANTA_AUDIO_PATH)
-                    if audio_path.exists():
-                        data = audio_path.read_bytes()
-                        b64 = base64.b64encode(data).decode()
-                        st.markdown(
-                            f'<audio autoplay style="display:none" src="data:audio/mpeg;base64,{b64}"></audio>',
-                            unsafe_allow_html=True,
-                        )
-                    else:
-                        # Fall back to visible player if path missing
-                        st.audio(SANTA_AUDIO_PATH, format="audio/mp3", start_time=0)
-            except Exception:
-                # Final fallback
-                try:
-                    st.audio(SANTA_AUDIO_PATH, format="audio/mp3", start_time=0)
-                except Exception:
-                    st.warning("Intro music not available; check SANTA_AUDIO_PATH.")
-            st.session_state["intro_audio_played"] = True
-        return True
-
-    # First visit; show gate with big button
     st.markdown(
         """
         <div class="christmas-card" style="text-align:center;">
@@ -528,8 +632,7 @@ def show_entry_gate() -> bool:
     )
 
     if entered:
-        st.session_state["entered_lodge"] = True
-        # Play immediately, without visible controls
+        # Play intro as background (hidden element) once per click
         try:
             if str(SANTA_AUDIO_PATH).startswith(("http://", "https://", "data:")):
                 st.markdown(
@@ -552,11 +655,46 @@ def show_entry_gate() -> bool:
                 st.audio(SANTA_AUDIO_PATH, format="audio/mp3", start_time=0)
             except Exception:
                 st.warning("Intro music not available; check SANTA_AUDIO_PATH.")
-        st.session_state["intro_audio_played"] = True
-        # Continue without forcing a rerun
         return True
 
     return False
+
+
+def show_home_menu(state: Dict, current_user: str) -> None:
+    """
+    Show two main actions:
+    - Enter / edit gifts
+    - See assigned person (once assignments are generated)
+
+    Sets st.session_state["main_view"] accordingly.
+    """
+
+    # Default selection
+    if "main_view" not in st.session_state:
+        st.session_state["main_view"] = "wishlist"
+
+    st.markdown('<div class="christmas-card">', unsafe_allow_html=True)
+    st.subheader("What would you like to do?")
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        if st.button("⭐ See who you got", use_container_width=True):
+            st.session_state["main_view"] = "assignment"
+
+    with col2:
+        if st.button("🎁 Edit your wishlist", use_container_width=True):
+            st.session_state["main_view"] = "wishlist"
+
+    # Status hint
+    if not state.get("assignments_generated"):
+        st.info(
+            "The draw is ready and was generated at app start."
+        )
+    else:
+        st.success("The draw is ready. You can see who you got.")
+
+    st.markdown("</div>", unsafe_allow_html=True)
 
 def main() -> None:
     st.set_page_config(
@@ -607,10 +745,25 @@ def main() -> None:
     # Generate assignments once possible
     ensure_assignments(state)
 
-    if not state["assignments_generated"]:
+    # Show the two-option home menu
+    show_home_menu(state, current_user)
+
+    # Decide what to show based on selected view
+    view = st.session_state.get("main_view", "wishlist")
+
+    if view == "wishlist":
         show_preferences_ui(current_user, state)
-    else:
-        show_assignment_ui(current_user, state)
+    elif view == "assignment":
+        if state.get("assignments_generated"):
+            show_assignment_ui(current_user, state)
+        else:
+            st.markdown('<div class="christmas-card">', unsafe_allow_html=True)
+            st.subheader("Your draw is not ready yet")
+            st.info(
+                "At least one person has not saved their wishlist yet. "
+                "Once everyone is done, the draw will be finalized and you will see your assignment here."
+            )
+            st.markdown("</div>", unsafe_allow_html=True)
 
     if APP_MODE == "test":
         show_test_panel(state)
