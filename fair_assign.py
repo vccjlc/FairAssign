@@ -63,11 +63,6 @@ SANTA_AUDIO_PATH = os.getenv(
     str(BASE_DIR / "assets" / "intro_jingle.mp3"),
 )
 
-# Audio played when user goes to see their assigned person
-HO_HO_AUDIO_PATH = os.getenv(
-    "HO_HO_AUDIO_PATH",
-    str(BASE_DIR / "assets" / "ho_ho_ho.mp3"),
-)
 
 # Number of recipients assigned to each giver (1 by default; future configurable)
 ASSIGNMENTS_PER_GIVER = int(os.getenv("ASSIGNMENTS_PER_GIVER", "1"))
@@ -365,6 +360,7 @@ def add_christmas_style() -> None:
     margin-bottom: 0.6rem;
     border: 1px solid #d6dbea;
     box-shadow: 0 1px 2px rgba(0,0,0,0.03);
+    color: #111111;
 }
 .caption-bg.small, .christmas-card .caption-bg.small {
     font-size: 0.95rem;
@@ -858,9 +854,11 @@ def show_assignment_ui(user_name: str, state: Dict) -> None:
                 """
                 <div class="caption-bg">
                   <ul style="margin: 0; padding-left: 1.1rem;">
-                    <li>The person whose wishlist you see does not see which specific item was reserved.</li>
-                    <li>Other buyers can see reserved marks to avoid duplicate purchases.</li>
-                    <li>The giftee only sees that some items are reserved, without details.</li>
+                    <li>You can mark gifts as reserved and unmark as many times as you want.</li>
+                    <li>Change are visible live.</li>
+                    <li>&lt;user&gt; does not see which specific item was reserved.</li>
+                    <li>Other buyers (if any) can see reserved marks to avoid duplicate purchases.</li>
+                    <li>&lt;user&gt; only sees that some items are reserved, without details.</li>
                   </ul>
                 </div>
                 """,
@@ -886,51 +884,50 @@ def show_video_page() -> None:
         st.info("No video configured.")
         return
 
-    # Center the video inside a nice card, similar to previous styling
-    with st.container(border=True):
-        st.markdown('<div class="caption-bg"><strong>See how the drawing was made</strong></div>', unsafe_allow_html=True)
+    # Simple heading without a card wrapper
+    st.markdown('<div class="caption-bg"><strong>See how the drawing was made</strong></div>', unsafe_allow_html=True)
 
-        is_loading = bool(st.session_state.pop("video_loading", False))
+    is_loading = bool(st.session_state.pop("video_loading", False))
 
-        def render_video() -> None:
-            try:
-                if video_src.startswith(("http://", "https://", "data:")):
-                    st.markdown(
-                        f'<video preload="metadata" controls playsinline '
-                        f'style="width:100%; border-radius:12px; opacity:0.95; box-shadow: 0 8px 24px rgba(0,0,0,0.08);" '
-                        f'src="{video_src}"></video>',
-                        unsafe_allow_html=True,
-                    )
-                else:
-                    vpath = Path(video_src)
-                    if not vpath.exists():
-                        assets = BASE_DIR / "assets"
-                        if assets.exists():
-                            for f in assets.glob("*"):
-                                if f.name.lower() == vpath.name.lower():
-                                    vpath = f
-                                    break
-                    if vpath.exists():
-                        b64 = _read_file_b64(str(vpath)) or ""
-                        if b64:
-                            st.markdown(
-                                f'<video preload="metadata" controls playsinline '
-                                f'style="width:100%; border-radius:12px; opacity:0.95; box-shadow: 0 8px 24px rgba(0,0,0,0.08);" '
-                                f'src="data:video/mp4;base64,{b64}"></video>',
-                                unsafe_allow_html=True,
-                            )
-                        else:
-                            st.video(str(vpath), format="video/mp4")
+    def render_video() -> None:
+        try:
+            if video_src.startswith(("http://", "https://", "data:")):
+                st.markdown(
+                    f'<video preload="metadata" controls playsinline '
+                    f'style="width:100%; border-radius:12px; opacity:0.95; box-shadow: 0 8px 24px rgba(0,0,0,0.08);" '
+                    f'src="{video_src}"></video>',
+                    unsafe_allow_html=True,
+                )
+            else:
+                vpath = Path(video_src)
+                if not vpath.exists():
+                    assets = BASE_DIR / "assets"
+                    if assets.exists():
+                        for f in assets.glob("*"):
+                            if f.name.lower() == vpath.name.lower():
+                                vpath = f
+                                break
+                if vpath.exists():
+                    b64 = _read_file_b64(str(vpath)) or ""
+                    if b64:
+                        st.markdown(
+                            f'<video preload="metadata" controls playsinline '
+                            f'style="width:100%; border-radius:12px; opacity:0.95; box-shadow: 0 8px 24px rgba(0,0,0,0.08);" '
+                            f'src="data:video/mp4;base64,{b64}"></video>',
+                            unsafe_allow_html=True,
+                        )
                     else:
-                        st.video(video_src, format="video/mp4")
-            except Exception:
-                st.video(video_src, format="video/mp4")
+                        st.video(str(vpath), format="video/mp4")
+                else:
+                    st.video(video_src, format="video/mp4")
+        except Exception:
+            st.video(video_src, format="video/mp4")
 
-        if is_loading:
-            with st.spinner("Loading video..."):
-                render_video()
-        else:
+    if is_loading:
+        with st.spinner("Loading video..."):
             render_video()
+    else:
+        render_video()
 
 
 def render_bottom_video_cta(current_user: str | None) -> None:
@@ -1138,13 +1135,16 @@ def main() -> None:
     # Generate assignments once possible
     ensure_assignments(state)
 
-    # Show the two-option home menu
-    show_home_menu(state, current_user)
+    # Default view
+    if "main_view" not in st.session_state:
+        st.session_state["main_view"] = "home"
 
     # Decide what to show based on selected view
     view = st.session_state.get("main_view", "home")
 
-    if view == "wishlist":
+    if view == "home":
+        show_home_menu(state, current_user)
+    elif view == "wishlist":
         # Resume background music on non-video views
         st.session_state["bg_music_on"] = True
         show_preferences_ui(current_user, state)
@@ -1157,8 +1157,8 @@ def main() -> None:
         st.session_state["bg_music_on"] = False
         show_video_page()
 
-    # Bottom CTA to open the video page (not shown while already on video page)
-    if view != "video":
+    # Bottom CTA only on home and wishlist
+    if view in ("home", "wishlist"):
         render_bottom_video_cta(current_user)
 
     if APP_MODE == "test":
