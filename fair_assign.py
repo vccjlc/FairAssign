@@ -54,7 +54,8 @@ BACKGROUND_PATH = BASE_DIR / "assets" / "background.png"
 
 CHRISTMAS_CLIP_PATH = os.getenv(
     "CHRISTMAS_CLIP_PATH",
-    str(BASE_DIR / "assets" / "christmas_clip.mp4"),
+    # Default to external hosted clip; override via env to use a local file or another URL
+    "https://imgur.com/a/vK3MtjL",
 )
 
 SANTA_AUDIO_PATH = os.getenv(
@@ -449,20 +450,20 @@ def render_background_music() -> None:
         else:
             audio_path = Path(SANTA_AUDIO_PATH)
             if audio_path.exists():
-                data = audio_path.read_bytes()
-                b64 = base64.b64encode(data).decode()
+                # Use cached b64 if available to avoid disk IO on reruns
+                b64 = _read_file_b64(str(audio_path)) or ""
+                if not b64:
+                    return
                 st.markdown(
                     f'<audio autoplay loop style="display:none" src="data:audio/mpeg;base64,{b64}"></audio>',
                     unsafe_allow_html=True,
                 )
             else:
-                # Fallback to visible player if path missing
-                st.audio(SANTA_AUDIO_PATH, format="audio/mp3", start_time=0)
+                # Do not show a visible player; silently skip if file missing
+                return
     except Exception:
-        try:
-            st.audio(SANTA_AUDIO_PATH, format="audio/mp3", start_time=0)
-        except Exception:
-            st.warning("Background music not available; check SANTA_AUDIO_PATH.")
+        # Avoid rendering a visible player; skip on error
+        return
 
 
 def play_hidden_audio(audio_src: str) -> None:
@@ -677,7 +678,11 @@ def show_preferences_ui(user_name: str, state: Dict) -> None:
         for item in existing_prefs
     )
     if any_marked:
-        st.info("Some of your gifts might have been reserved! Be careful with editing.")
+        st.markdown(
+            '<div class="caption-bg small">Some of your gifts might have been reserved! '
+            "Be careful with editing.</div>",
+            unsafe_allow_html=True,
+        )
 
     # Show ephemeral saved caption at the top (visible for ~5s after save)
     ts = st.session_state.get("wishlist_saved_ts")
@@ -836,27 +841,47 @@ def show_assignment_ui(user_name: str, state: Dict) -> None:
             unsafe_allow_html=True,
         )
 
-    # Video at the bottom: loads after the list; slightly transparent
+    # Video at the bottom: lazy load after list so page is responsive first
     if CHRISTMAS_CLIP_PATH:
-        st.markdown('<div class="caption-bg"><strong>How the drawing was made</strong></div>', unsafe_allow_html=True)
-        try:
-            vpath = Path(str(CHRISTMAS_CLIP_PATH))
-            if vpath.exists():
-                b64 = _read_file_b64(str(vpath))
-                if b64:
-                    st.markdown(
-                        f'<video preload="auto" controls playsinline style="width:100%; border-radius:12px; opacity:0.85;" src="data:video/mp4;base64,{b64}"></video>',
-                        unsafe_allow_html=True,
-                    )
+        st.markdown('<div class="caption-bg"><strong>See how the drawing was made:</strong></div>', unsafe_allow_html=True)
+        video_flag_key = f"show_assignment_video_{user_name}"
+        if not st.session_state.get(video_flag_key):
+            if st.button("Load video", key=f"load_video_btn_{user_name}"):
+                st.session_state[video_flag_key] = True
+        if st.session_state.get(video_flag_key):
+            try:
+                vpath = Path(str(CHRISTMAS_CLIP_PATH))
+                src_str = str(CHRISTMAS_CLIP_PATH).strip()
+                if vpath.exists():
+                    b64 = _read_file_b64(str(vpath))
+                    if b64:
+                        st.markdown(
+                            f'<video preload="metadata" controls playsinline style="width:100%; border-radius:12px; opacity:0.85;" src="data:video/mp4;base64,{b64}"></video>',
+                            unsafe_allow_html=True,
+                        )
+                    else:
+                        st.video(CHRISTMAS_CLIP_PATH)
                 else:
-                    st.video(CHRISTMAS_CLIP_PATH)
-            else:
-                st.markdown(
-                    f'<video preload="auto" controls playsinline style="width:100%; border-radius:12px; opacity:0.85;" src="{CHRISTMAS_CLIP_PATH}"></video>',
-                    unsafe_allow_html=True,
-                )
-        except Exception:
-            st.video(CHRISTMAS_CLIP_PATH)
+                    # For URLs: if it's a direct .mp4 use <video>, otherwise embed in an iframe
+                    if src_str.lower().endswith(".mp4"):
+                        st.markdown(
+                            f'<video preload="metadata" controls playsinline style="width:100%; border-radius:12px; opacity:0.85;" src="{src_str}"></video>',
+                            unsafe_allow_html=True,
+                        )
+                    else:
+                        # Use provider embed where possible (keeps link hidden)
+                        embed_src = src_str
+                        if "imgur.com" in src_str and "/a/" in src_str:
+                            # Imgur album embed
+                            embed_src = src_str.rstrip("/") + "/embed?pub=true"
+                        st.markdown(
+                            f'<iframe loading="lazy" allow="autoplay; encrypted-media" referrerpolicy="no-referrer" '
+                            f'style="width:100%; height:360px; border:0; border-radius:12px; opacity:0.92;" '
+                            f'src="{embed_src}"></iframe>',
+                            unsafe_allow_html=True,
+                        )
+            except Exception:
+                st.video(CHRISTMAS_CLIP_PATH)
 
     st.markdown("</div>", unsafe_allow_html=True)
 
@@ -1049,8 +1074,7 @@ def main() -> None:
                 show_test_panel(state)
             return
 
-    # Preload the video once to speed up first playback
-    preload_christmas_clip()
+    # Skip preloading the video to keep the page snappy; it will load on demand
 
     # Sidebar user panel
     st.sidebar.write(f"Logged in as: **{current_user}**")
