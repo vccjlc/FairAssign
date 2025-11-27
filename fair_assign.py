@@ -317,34 +317,31 @@ def authenticate(name: str, password: str) -> bool:
 # ---------------------------------------------------------------------------
 
 def add_christmas_style() -> None:
-    """Simple Christmas themed background and card styling."""
-    # Try to load background image
-    bg_css = ""
+    """Simple Christmas themed background and card styling (one-time injection)."""
+    # Inject CSS only once per session to reduce repeated work
+    if st.session_state.get("_css_injected"):
+        return
+
+    # Default to a lightweight gradient to avoid heavy media parsing
+    bg_css = """
+    [data-testid="stAppViewContainer"] {
+        background: radial-gradient(circle at top, #2a2a2a, #000000);
+    }
+    """
+    # Optionally use a small cached background image if available (<200KB)
     try:
-        if BACKGROUND_PATH.exists():
-            with BACKGROUND_PATH.open("rb") as f:
-                data = f.read()
-            encoded = base64.b64encode(data).decode()
-            bg_css = f"""
-        [data-testid="stAppViewContainer"] {{
-            background: url("data:image/png;base64,{encoded}") no-repeat center center fixed;
-            background-size: cover;
-        }}
-        """
-        else:
-            # Darker fallback gradient for better contrast with white headings
-            bg_css = """
-        [data-testid="stAppViewContainer"] {
-            background: radial-gradient(circle at top, #2a2a2a, #000000);
-        }
-        """
+        if BACKGROUND_PATH.exists() and BACKGROUND_PATH.stat().st_size <= 200_000:
+            encoded = _read_file_b64(str(BACKGROUND_PATH)) or ""
+            if encoded:
+                bg_css = f"""
+    [data-testid="stAppViewContainer"] {{
+        background: url("data:image/png;base64,{encoded}") no-repeat center center fixed;
+        background-size: cover;
+    }}
+    """
     except Exception:
-        # If any error, keep a safe fallback
-        bg_css = """
-        [data-testid="stAppViewContainer"] {
-            background: radial-gradient(circle at top, #2a2a2a, #000000);
-        }
-        """
+        # Keep gradient fallback on any error
+        pass
 
     css_core = """
 [data-testid="stHeader"] {
@@ -458,6 +455,7 @@ def add_christmas_style() -> None:
 }
 """
     st.markdown("<style>" + bg_css + css_core + "</style>", unsafe_allow_html=True)
+    st.session_state["_css_injected"] = True
 
 
 def render_background_music() -> None:
@@ -638,7 +636,7 @@ def show_fullscreen_clip_once(video_src: str) -> bool:
     col = st.container()
     with col:
         if st.button("Continue to your draw", use_container_width=True):
-            _safe_rerun()
+            pass
     return True
 
 
@@ -689,8 +687,6 @@ def show_login() -> str | None:
             if authenticate(name, password):
                 st.session_state["current_user"] = name
                 st.success(f"Welcome, {name}")
-                # Trigger a rerun so we skip the login form
-                _safe_rerun()
             else:
                 st.error("Invalid password")
     return st.session_state.get("current_user")
@@ -713,7 +709,6 @@ def show_preferences_ui(user_name: str, state: Dict) -> None:
             else:
                 st.session_state["bg_music_on"] = False
             st.session_state.pop("return_view", None)
-            _safe_rerun()
 
         # Caution caption if others have reserved/bought items
         any_marked = any(
@@ -739,27 +734,45 @@ def show_preferences_ui(user_name: str, state: Dict) -> None:
                 pass
 
 
-        # Initialize inputs and autosave on change
-        for i in range(7):
-            default_value = ""
-            if i < len(existing_prefs) and isinstance(existing_prefs[i], dict):
-                default_value = existing_prefs[i].get("text", "")
-            st.text_input(
-                f"Gift idea {i + 1}",
-                value=default_value,
-                key=f"wishlist_input_{user_name}_{i}",
-                on_change=on_wishlist_change,
-                args=(user_name, state),
-            )
-
-        # Repeat the ephemeral saved caption at the bottom
-        ts = st.session_state.get("wishlist_saved_ts")
-        if ts is not None:
-            try:
-                if (time.time() - ts) <= 5:
-                    st.caption("✓ Wishlist saved")
-            except Exception:
-                pass
+        # Batch inputs inside a form to avoid reruns on every field change
+        with st.form(f"wishes_{user_name}"):
+            for i in range(7):
+                default_value = ""
+                if i < len(existing_prefs) and isinstance(existing_prefs[i], dict):
+                    default_value = existing_prefs[i].get("text", "")
+                st.text_input(
+                    f"Gift idea {i + 1}",
+                    value=default_value,
+                    key=f"wishlist_input_{user_name}_{i}",
+                )
+            submitted = st.form_submit_button("Save wishlist")
+            if submitted:
+                # Save all 7 inputs at once; preserve status for unchanged texts
+                existing_by_text = {
+                    item["text"]: item
+                    for item in (user_state.get("preferences") or [])
+                    if isinstance(item, dict) and "text" in item
+                }
+                new_items: List[Dict] = []
+                for i in range(7):
+                    raw = st.session_state.get(f"wishlist_input_{user_name}_{i}", "")
+                    value = (raw or "").strip()
+                    if value:
+                        prev = existing_by_text.get(value)
+                        if prev:
+                            new_items.append({"text": value, "status": prev.get("status", "open"), "marked_by": prev.get("marked_by")})
+                        else:
+                            new_items.append({"text": value, "status": "open", "marked_by": None})
+                user_state["preferences"] = new_items
+                user_state["confirmed"] = bool(new_items)
+                save_state(state)
+                st.session_state["wishlist_saved_ts"] = time.time()
+                toast_fn = getattr(st, "toast", None)
+                if callable(toast_fn):
+                    try:
+                        toast_fn("Wishlist saved", icon="✅")
+                    except Exception:
+                        pass
 
         completed = sum(1 for u in state["users"].values() if u.get("confirmed"))
         total = len(state["users"])
@@ -771,6 +784,83 @@ def show_preferences_ui(user_name: str, state: Dict) -> None:
                 mark = "✓" if u.get("confirmed") else "•"
                 st.write(f"{mark} {name}")
 
+
+@st.fragment
+def render_recipient_block(user_name: str, recipient: str, state: Dict) -> None:
+    """Render a single recipient wishlist and action buttons as a fragment."""
+    header_cols = st.columns([4, 2])
+    with header_cols[0]:
+        st.markdown(f"**{recipient}'s wishlist**")
+    prefs = state["users"].get(recipient, {}).get("preferences") or []
+    if not prefs:
+        st.markdown(
+            f'<div class="caption-bg small">{recipient} didn\'t add any wishlist item yet. '
+            f'Use your imagination or contact {recipient}!</div>',
+            unsafe_allow_html=True,
+        )
+        st.write("")
+        return
+    with header_cols[1]:
+        try:
+            lines = []
+            for i, it in enumerate(prefs):
+                if not isinstance(it, dict):
+                    continue
+                txt = (it.get("text") or "").strip()
+                if not txt:
+                    continue
+                status = it.get("status", "open")
+                marked_by = it.get("marked_by")
+                suffix = ""
+                if status == "reserved":
+                    suffix = " - Reserved by you" if marked_by == user_name else " - Reserved by someone"
+                lines.append(f"{i + 1}. {txt}{suffix}")
+            wishlist_text = "\n".join(lines) or "No wishlist items"
+            st.download_button(
+                label="Download wishlist (.txt)",
+                data=wishlist_text,
+                file_name=f"wishlist_{recipient}.txt",
+                mime="text/plain",
+                key=f"download_wishlist_{user_name}_{recipient}",
+            )
+        except Exception:
+            pass
+
+    for idx, item in enumerate(prefs):
+        text = item.get("text", "")
+        status = item.get("status", "open")
+        marked_by = item.get("marked_by")
+
+        cols = st.columns([6, 2, 2])
+        with cols[0]:
+            label_html = f"{idx + 1}. {text}"
+            if status == "reserved":
+                badge = "Reserved by you" if marked_by == user_name else "Reserved by someone"
+                label_html += f' <span class="reserved-badge">{badge}</span>'
+            st.markdown(label_html, unsafe_allow_html=True)
+
+        # Disable reserve if already reserved by someone else
+        disable_reserve = status == "reserved" and marked_by != user_name
+        disable_unmark = not (status == "reserved" and marked_by == user_name)
+
+        reserve_key = f"reserve_{user_name}_{recipient}_{idx}"
+        clear_key = f"clear_{user_name}_{recipient}_{idx}"
+
+        with cols[1]:
+            # If already reserved by current user, show disabled "Reserved" button
+            if status == "reserved" and marked_by == user_name:
+                st.button("Reserved", key=reserve_key, disabled=True)
+            elif st.button("Reserve", key=reserve_key, disabled=disable_reserve):
+                item["status"] = "reserved"
+                item["marked_by"] = user_name
+                save_state(state)
+        with cols[2]:
+            if st.button("Unmark", key=clear_key, disabled=disable_unmark):
+                item["status"] = "open"
+                item["marked_by"] = None
+                save_state(state)
+
+    st.write("")
 
 def show_assignment_ui(user_name: str, state: Dict) -> None:
     """Page where a user sees their final assignment and can mark items reserved/bought."""
@@ -789,7 +879,6 @@ def show_assignment_ui(user_name: str, state: Dict) -> None:
             else:
                 st.session_state["bg_music_on"] = False
             st.session_state.pop("return_view", None)
-            _safe_rerun()
 
         recipients = get_recipients_for_giver(state, user_name)
         if not recipients:
@@ -800,82 +889,7 @@ def show_assignment_ui(user_name: str, state: Dict) -> None:
         st.write("")
 
         for recipient in recipients:
-            header_cols = st.columns([4, 2])
-            with header_cols[0]:
-                st.markdown(f"**{recipient}'s wishlist**")
-            prefs = state["users"].get(recipient, {}).get("preferences") or []
-            if not prefs:
-                st.markdown(
-                    f'<div class="caption-bg small">{recipient} didn\'t add any wishlist item yet. '
-                    f'Use your imagination or contact {recipient}!</div>',
-                    unsafe_allow_html=True,
-                )
-                st.write("")
-                continue
-            with header_cols[1]:
-                try:
-                    lines = []
-                    for i, it in enumerate(prefs):
-                        if not isinstance(it, dict):
-                            continue
-                        txt = (it.get("text") or "").strip()
-                        if not txt:
-                            continue
-                        status = it.get("status", "open")
-                        marked_by = it.get("marked_by")
-                        suffix = ""
-                        if status == "reserved":
-                            suffix = " - Reserved by you" if marked_by == user_name else " - Reserved by someone"
-                        lines.append(f"{i + 1}. {txt}{suffix}")
-                    wishlist_text = "\n".join(lines) or "No wishlist items"
-                    st.download_button(
-                        label="Download wishlist (.txt)",
-                        data=wishlist_text,
-                        file_name=f"wishlist_{recipient}.txt",
-                        mime="text/plain",
-                        key=f"download_wishlist_{user_name}_{recipient}",
-                    )
-                except Exception:
-                    pass
-
-            for idx, item in enumerate(prefs):
-                text = item.get("text", "")
-                status = item.get("status", "open")
-                marked_by = item.get("marked_by")
-
-                cols = st.columns([6, 2, 2])
-                with cols[0]:
-                    label_html = f"{idx + 1}. {text}"
-                    if status == "reserved":
-                        badge = "Reserved by you" if marked_by == user_name else "Reserved by someone"
-                        label_html += f' <span class="reserved-badge">{badge}</span>'
-                    st.markdown(label_html, unsafe_allow_html=True)
-
-                # Actions
-                # Disable reserve if already reserved by someone else
-                disable_reserve = status == "reserved" and marked_by != user_name
-                disable_unmark = not (status == "reserved" and marked_by == user_name)
-
-                reserve_key = f"reserve_{user_name}_{recipient}_{idx}"
-                clear_key = f"clear_{user_name}_{recipient}_{idx}"
-
-                with cols[1]:
-                    # If already reserved by current user, show disabled "Reserved" button
-                    if status == "reserved" and marked_by == user_name:
-                        st.button("Reserved", key=reserve_key, disabled=True)
-                    elif st.button("Reserve", key=reserve_key, disabled=disable_reserve):
-                        item["status"] = "reserved"
-                        item["marked_by"] = user_name
-                        save_state(state)
-                        _safe_rerun()
-                with cols[2]:
-                    if st.button("Unmark", key=clear_key, disabled=disable_unmark):
-                        item["status"] = "open"
-                        item["marked_by"] = None
-                        save_state(state)
-                        _safe_rerun()
-
-            st.write("")
+            render_recipient_block(user_name, recipient, state)
 
         # Reservation info moved below and hidden behind an expander
         with st.expander("Info"):
@@ -902,16 +916,7 @@ def show_assignment_ui(user_name: str, state: Dict) -> None:
             """
             st.markdown(info_html, unsafe_allow_html=True)
 
-        # Video moved to a dedicated subpage to avoid impacting core page load
-        if CHRISTMAS_CLIP_PATH:
-            st.markdown('<div class="caption-bg"><strong>See how the drawing was made</strong></div>', unsafe_allow_html=True)
-            if st.button("▶ Play", key=f"see_video_{user_name}", use_container_width=True):
-                # remember where we came from
-                st.session_state["return_view"] = st.session_state.get("main_view", "home")
-                st.session_state["video_loading"] = True
-                st.session_state["main_view"] = "video"
-                st.session_state["bg_music_on"] = False
-                _safe_rerun()
+        # Video CTA is shown only on the main (home) screen after login
 
 
 def show_video_page() -> None:
@@ -931,12 +936,7 @@ def show_video_page() -> None:
     def render_video() -> None:
         try:
             if video_src.startswith(("http://", "https://", "data:")):
-                st.markdown(
-                    f'<video preload="metadata" controls playsinline '
-                    f'style="width:100%; border-radius:12px; opacity:1; box-shadow: 0 8px 24px rgba(0,0,0,0.08);" '
-                    f'src="{video_src}"></video>',
-                    unsafe_allow_html=True,
-                )
+                st.video(video_src, format="video/mp4")
             else:
                 vpath = Path(video_src)
                 if not vpath.exists():
@@ -946,19 +946,7 @@ def show_video_page() -> None:
                             if f.name.lower() == vpath.name.lower():
                                 vpath = f
                                 break
-                if vpath.exists():
-                    b64 = _read_file_b64(str(vpath)) or ""
-                    if b64:
-                        st.markdown(
-                            f'<video preload="metadata" controls playsinline '
-                            f'style="width:100%; border-radius:12px; opacity:1; box-shadow: 0 8px 24px rgba(0,0,0,0.08);" '
-                            f'src="data:video/mp4;base64,{b64}"></video>',
-                            unsafe_allow_html=True,
-                        )
-                    else:
-                        st.video(str(vpath), format="video/mp4")
-                else:
-                    st.video(video_src, format="video/mp4")
+                st.video(str(vpath) if vpath.exists() else video_src, format="video/mp4")
         except Exception:
             st.video(video_src, format="video/mp4")
 
@@ -979,7 +967,6 @@ def show_video_page() -> None:
             st.session_state["bg_music_on"] = False
         # clean up so the next jump to video can store a fresh origin
         st.session_state.pop("return_view", None)
-        _safe_rerun()
 
 def render_bottom_video_cta(current_user: str | None) -> None:
     """Render a bottom-of-page CTA to open the video subpage (only when logged in)."""
@@ -995,7 +982,6 @@ def render_bottom_video_cta(current_user: str | None) -> None:
             st.session_state["video_loading"] = True
             st.session_state["main_view"] = "video"
             st.session_state["bg_music_on"] = False
-            _safe_rerun()
 
 def show_test_panel(state: Dict) -> None:
     """Developer tools only in TEST mode."""
@@ -1053,7 +1039,6 @@ def show_test_panel(state: Dict) -> None:
         new_state = init_state()
         save_state(new_state)
         st.sidebar.success("State reset. The page will reload.")
-        _safe_rerun()
 
 
 # ---------------------------------------------------------------------------
@@ -1083,7 +1068,6 @@ def show_entry_gate() -> bool:
         # Persist that user has entered and enable background music
         st.session_state["entered_lodge"] = True
         st.session_state["bg_music_on"] = True
-        _safe_rerun()
         return True
 
     return False
@@ -1107,13 +1091,18 @@ def show_home_menu(state: Dict, current_user: str) -> None:
             if st.button("⭐ See who you got", use_container_width=True):
                 st.session_state["main_view"] = "assignment"
                 st.session_state["bg_music_on"] = False
-                _safe_rerun()
+                st.session_state["return_view"] = "home"
+                # Render target view immediately in this run for instant navigation
+                show_assignment_ui(current_user, state)
+                st.stop()
 
         with col2:
             if st.button("🎁 Edit your wishlist", use_container_width=True):
                 st.session_state["main_view"] = "wishlist"
                 st.session_state["bg_music_on"] = True
-                _safe_rerun()
+                st.session_state["return_view"] = "home"
+                show_preferences_ui(current_user, state)
+                st.stop()
 
         # Status hint (show once for up to 30 seconds, then never again this session)
         if state.get("assignments_generated"):
@@ -1208,8 +1197,8 @@ def main() -> None:
         st.session_state["bg_music_on"] = False
         show_video_page()
 
-    # Bottom CTA only on home and wishlist
-    if view in ("home", "wishlist"):
+    # Bottom CTA only on home
+    if view == "home":
         render_bottom_video_cta(current_user)
 
     if APP_MODE == "test":
