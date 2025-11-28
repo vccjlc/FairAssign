@@ -870,19 +870,13 @@ def render_recipient_block(user_name: str, recipient: str, state: Dict) -> None:
                 item["status"] = "reserved"
                 item["marked_by"] = user_name
                 save_state(state)
-                try:
-                    st.rerun(scope="fragment")  # Streamlit >= 1.48
-                except Exception:
-                    _safe_rerun()  # fallback (full app rerun)
+                _safe_rerun()  # immediate rerun so status/disabled reflect the change
         with cols[2]:
             if st.button("Unmark", key=clear_key, disabled=disable_unmark):
                 item["status"] = "open"
                 item["marked_by"] = None
                 save_state(state)
-                try:
-                    st.rerun(scope="fragment")  # Streamlit >= 1.48
-                except Exception:
-                    _safe_rerun()  # fallback (full app rerun)
+                _safe_rerun()  # immediate rerun so status/disabled reflect the change
 
     st.write("")
 
@@ -926,11 +920,11 @@ def show_assignment_ui(user_name: str, state: Dict) -> None:
             info_html = f"""
             <div class="caption-bg">
               <ul style="margin: 0; padding-left: 1.1rem;">
-                <li>You can mark gifts as reserved and unmark as many times as you want.</li>
-                <li>Changes are visible live.</li>
                 <li>{giftee_label} {does_verb} not see which specific item was reserved.</li>
-                <li>Other buyers (if any) can see reserved marks to avoid duplicate purchases.</li>
+                <li>You can mark gift(s) as reserved and unmark as many times as you want.</li>
+                <li>Other buyers (if any), except {giftee_label}, can see reserved marks to avoid duplicate purchases.</li>
                 <li>{giftee_label} only {sees_verb} that some items are reserved, without details.</li>
+                <li>Changes are visible live and only within the limitations described above.</li>
               </ul>
             </div>
             """
