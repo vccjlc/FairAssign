@@ -317,31 +317,34 @@ def authenticate(name: str, password: str) -> bool:
 # ---------------------------------------------------------------------------
 
 def add_christmas_style() -> None:
-    """Simple Christmas themed background and card styling (one-time injection)."""
-    # Inject CSS only once per session to reduce repeated work
-    if st.session_state.get("_css_injected"):
-        return
-
-    # Default to a lightweight gradient to avoid heavy media parsing
-    bg_css = """
-    [data-testid="stAppViewContainer"] {
-        background: radial-gradient(circle at top, #2a2a2a, #000000);
-    }
-    """
-    # Optionally use a small cached background image if available (<200KB)
+    """Simple Christmas themed background and card styling."""
+    # Try to load background image
+    bg_css = ""
     try:
-        if BACKGROUND_PATH.exists() and BACKGROUND_PATH.stat().st_size <= 200_000:
-            encoded = _read_file_b64(str(BACKGROUND_PATH)) or ""
-            if encoded:
-                bg_css = f"""
-    [data-testid="stAppViewContainer"] {{
-        background: url("data:image/png;base64,{encoded}") no-repeat center center fixed;
-        background-size: cover;
-    }}
-    """
+        if BACKGROUND_PATH.exists():
+            with BACKGROUND_PATH.open("rb") as f:
+                data = f.read()
+            encoded = base64.b64encode(data).decode()
+            bg_css = f"""
+        [data-testid="stAppViewContainer"] {{
+            background: url("data:image/png;base64,{encoded}") no-repeat center center fixed;
+            background-size: cover;
+        }}
+        """
+        else:
+            # Darker fallback gradient for better contrast with white headings
+            bg_css = """
+        [data-testid="stAppViewContainer"] {
+            background: radial-gradient(circle at top, #2a2a2a, #000000);
+        }
+        """
     except Exception:
-        # Keep gradient fallback on any error
-        pass
+        # If any error, keep a safe fallback
+        bg_css = """
+        [data-testid="stAppViewContainer"] {
+            background: radial-gradient(circle at top, #2a2a2a, #000000);
+        }
+        """
 
     css_core = """
 [data-testid="stHeader"] {
@@ -455,7 +458,6 @@ def add_christmas_style() -> None:
 }
 """
     st.markdown("<style>" + bg_css + css_core + "</style>", unsafe_allow_html=True)
-    st.session_state["_css_injected"] = True
 
 
 def render_background_music() -> None:
