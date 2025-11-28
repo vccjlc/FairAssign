@@ -870,11 +870,19 @@ def render_recipient_block(user_name: str, recipient: str, state: Dict) -> None:
                 item["status"] = "reserved"
                 item["marked_by"] = user_name
                 save_state(state)
+                try:
+                    st.rerun(scope="fragment")  # Streamlit >= 1.48
+                except Exception:
+                    _safe_rerun()  # fallback (full app rerun)
         with cols[2]:
             if st.button("Unmark", key=clear_key, disabled=disable_unmark):
                 item["status"] = "open"
                 item["marked_by"] = None
                 save_state(state)
+                try:
+                    st.rerun(scope="fragment")  # Streamlit >= 1.48
+                except Exception:
+                    _safe_rerun()  # fallback (full app rerun)
 
     st.write("")
 
