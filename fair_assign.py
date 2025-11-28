@@ -1125,7 +1125,7 @@ def main() -> None:
     )
     add_christmas_style()
 
-    # Show the heading and mode only before entering the lodge
+    # Show the heading (and mode in TEST) only before entering the lodge
     if not st.session_state.get("entered_lodge"):
         st.markdown('<div class="christmas-title">Fair Assign – Secret Santa</div>', unsafe_allow_html=True)
         st.markdown(
@@ -1135,12 +1135,15 @@ def main() -> None:
             unsafe_allow_html=True,
         )
 
-        st.markdown(
-            f"<p style='text-align:center; color:#ffffff; font-size:0.9rem;'>"
-            f"Current mode: <strong>{APP_MODE.upper()}</strong>"
-            "</p>",
-            unsafe_allow_html=True,
-        )
+        # In test mode, show the current mode to make it obvious you are not on prod.
+        # In prod, keep the UI clean and do not show the mode caption.
+        if APP_MODE == "test":
+            st.markdown(
+                f"<p style='text-align:center; color:#ffffff; font-size:0.9rem;'>"
+                f"Current mode: <strong>{APP_MODE.upper()}</strong>"
+                "</p>",
+                unsafe_allow_html=True,
+            )
 
     # NEW: entry gate with big Play button and intro audio
     if not show_entry_gate():
