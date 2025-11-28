@@ -922,9 +922,9 @@ def show_assignment_ui(user_name: str, state: Dict) -> None:
               <ul style="margin: 0; padding-left: 1.1rem;">
                 <li>{giftee_label} {does_verb} not see which specific item was reserved.</li>
                 <li>You can mark gift(s) as reserved and unmark as many times as you want.</li>
-                <li>Other buyers (if any), except {giftee_label}, can see reserved marks to avoid duplicate purchases.</li>
+                <li>Other buyers (if any), except {giftee_label}, can see that specific item was reserved to avoid duplicate purchases.</li>
                 <li>{giftee_label} only {sees_verb} that some items are reserved, without details.</li>
-                <li>Changes are visible live and only within the limitations described above.</li>
+                <li>If you reopen the page, you will see others' changes immediately after they are done, within the visibility limits described above.</li>
               </ul>
             </div>
             """
