@@ -316,6 +316,23 @@ def authenticate(name: str, password: str) -> bool:
 # UI helpers
 # ---------------------------------------------------------------------------
 
+def go(view: str, return_view: str | None = None, *, music_on: bool | None = None, clear_return: bool = False) -> None:
+    """
+    Minimal navigation helper:
+    - sets main_view (and optionally return_view)
+    - toggles music if requested
+    - optionally clears any existing return_view
+    - triggers an immediate clean rerun
+    """
+    if clear_return:
+        st.session_state.pop("return_view", None)
+    if return_view is not None:
+        st.session_state["return_view"] = return_view
+    if music_on is not None:
+        st.session_state["bg_music_on"] = music_on
+    st.session_state["main_view"] = view
+    _safe_rerun()  # immediate clean rerun so previous containers disappear
+
 def add_christmas_style() -> None:
     """Simple Christmas themed background and card styling."""
     # Try to load background image
@@ -688,7 +705,8 @@ def show_login() -> str | None:
         if submitted:
             if authenticate(name, password):
                 st.session_state["current_user"] = name
-                st.success(f"Welcome, {name}")
+                _safe_rerun()  # clear the login card before rendering the app
+                st.stop()
             else:
                 st.error("Invalid password")
     return st.session_state.get("current_user")
@@ -703,14 +721,10 @@ def show_preferences_ui(user_name: str, state: Dict) -> None:
         st.markdown('<div class="caption-bg"><h3 style="margin:0;">Edit your wishlist</h3></div>', unsafe_allow_html=True)
 
         # --- Back button ---
-        back_target = st.session_state.get("return_view", "home")
         if st.button("⬅ Back", use_container_width=True):
-            st.session_state["main_view"] = back_target
-            if back_target in ("home", "wishlist"):
-                st.session_state["bg_music_on"] = True
-            else:
-                st.session_state["bg_music_on"] = False
-            st.session_state.pop("return_view", None)
+            back_target = st.session_state.get("return_view", "home")
+            st.session_state["bg_music_on"] = back_target in ("home", "wishlist")
+            go(back_target, clear_return=True)
 
         # Caution caption if others have reserved/bought items
         any_marked = any(
@@ -873,14 +887,10 @@ def show_assignment_ui(user_name: str, state: Dict) -> None:
         st.session_state["bg_music_on"] = False
 
         # --- Back button ---
-        back_target = st.session_state.get("return_view", "home")
         if st.button("⬅ Back", use_container_width=True):
-            st.session_state["main_view"] = back_target
-            if back_target in ("home", "wishlist"):
-                st.session_state["bg_music_on"] = True
-            else:
-                st.session_state["bg_music_on"] = False
-            st.session_state.pop("return_view", None)
+            back_target = st.session_state.get("return_view", "home")
+            st.session_state["bg_music_on"] = back_target in ("home", "wishlist")
+            go(back_target, clear_return=True)
 
         recipients = get_recipients_for_giver(state, user_name)
         if not recipients:
@@ -959,16 +969,10 @@ def show_video_page() -> None:
         render_video()
 
     # --- Back button ---
-    back_target = st.session_state.get("return_view", "home")
     if st.button("⬅ Back", use_container_width=True):
-        st.session_state["main_view"] = back_target
-        # resume music only on home / wishlist
-        if back_target in ("home", "wishlist"):
-            st.session_state["bg_music_on"] = True
-        else:
-            st.session_state["bg_music_on"] = False
-        # clean up so the next jump to video can store a fresh origin
-        st.session_state.pop("return_view", None)
+        back_target = st.session_state.get("return_view", "home")
+        st.session_state["bg_music_on"] = back_target in ("home", "wishlist")
+        go(back_target, clear_return=True)
 
 def render_bottom_video_cta(current_user: str | None) -> None:
     """Render a bottom-of-page CTA to open the video subpage (only when logged in)."""
@@ -979,11 +983,10 @@ def render_bottom_video_cta(current_user: str | None) -> None:
     with st.container(border=True):
         st.markdown('<div class="caption-bg small">See how the drawing was made</div>', unsafe_allow_html=True)
         if st.button("▶ Play", key=f"see_video_cta_{current_user}", use_container_width=True):
-            # remember where we came from
-            st.session_state["return_view"] = st.session_state.get("main_view", "home")
             st.session_state["video_loading"] = True
-            st.session_state["main_view"] = "video"
-            st.session_state["bg_music_on"] = False
+            # remember where we came from and navigate in a clean rerun
+            current = st.session_state.get("main_view", "home")
+            go("video", return_view=current, music_on=False)
 
 def show_test_panel(state: Dict) -> None:
     """Developer tools only in TEST mode."""
@@ -1070,7 +1073,8 @@ def show_entry_gate() -> bool:
         # Persist that user has entered and enable background music
         st.session_state["entered_lodge"] = True
         st.session_state["bg_music_on"] = True
-        return True
+        _safe_rerun()  # avoid showing the gate container alongside login
+        st.stop()
 
     return False
 
@@ -1091,20 +1095,11 @@ def show_home_menu(state: Dict, current_user: str) -> None:
 
         with col1:
             if st.button("⭐ See who you got", use_container_width=True):
-                st.session_state["main_view"] = "assignment"
-                st.session_state["bg_music_on"] = False
-                st.session_state["return_view"] = "home"
-                # Render target view immediately in this run for instant navigation
-                show_assignment_ui(current_user, state)
-                st.stop()
+                go("assignment", return_view="home", music_on=False)
 
         with col2:
             if st.button("🎁 Edit your wishlist", use_container_width=True):
-                st.session_state["main_view"] = "wishlist"
-                st.session_state["bg_music_on"] = True
-                st.session_state["return_view"] = "home"
-                show_preferences_ui(current_user, state)
-                st.stop()
+                go("wishlist", return_view="home", music_on=True)
 
         # Status hint (show once for up to 30 seconds, then never again this session)
         if state.get("assignments_generated"):
