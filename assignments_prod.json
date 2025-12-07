@@ -1,0 +1,17 @@
+{
+  "Magda": [
+    "Zuza"
+  ],
+  "Maria": [
+    "Magda"
+  ],
+  "Asia": [
+    "Jan"
+  ],
+  "Zuza": [
+    "Maria"
+  ],
+  "Jan": [
+    "Asia"
+  ]
+}

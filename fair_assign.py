@@ -3,19 +3,12 @@ fair_assign.py
 
 Streamlit Secret Santa style app for a fixed group of 5 people.
 
-Features now
-- Login with name + password
-- Each user can enter up to 7 wishlist items
-- When everyone has confirmed, a random assignment (derangement) is created
-- On next login, each user sees a Christmas clip and then only their own assignment
-- In TEST mode, there is a developer panel with full visibility and reset tools
-- In PROD mode, assignments remain secret except for each user's own result
-
-To run locally:
-    streamlit run fair_assign.py
-
-To switch modes:
-    export FAIR_ASSIGN_MODE=test   # or prod
+New simplified behavior:
+- Assignments are generated once locally with drawing.py into assignments_prod.json
+- The deployed app only reads that fixed assignments file (no in-app drawing, no test mode)
+- Each user has an external wishlist link (e.g. shared note or document)
+- "Edit your wishlist" opens the external link
+- "See who you got" shows your recipient(s) and links to their wishlists
 """
 
 import json
@@ -33,10 +26,6 @@ import streamlit as st
 # Configuration
 # ---------------------------------------------------------------------------
 
-APP_MODE = (os.getenv("FAIR_ASSIGN_MODE") or "test").strip().lower()
-if APP_MODE not in ("test", "prod"):
-    APP_MODE = "test"
-
 PARTICIPANTS = [
     {"name": "Magda", "password": "dvorakus"},
     {"name": "Maria", "password": "kejton"},
@@ -47,6 +36,15 @@ PARTICIPANTS = [
 
 USER_PASSWORDS = {p["name"]: p["password"] for p in PARTICIPANTS}
 USER_NAMES = [p["name"] for p in PARTICIPANTS]
+
+# External wishlist links for each person – TODO: replace with your real URLs
+WISHLIST_LINKS: Dict[str, str] = {
+    "Magda": "https://www.notion.so/Magda-s-Wishlist-2c28d5786a5480c89072c154293a77f9?source=copy_link",
+    "Maria": "https://www.notion.so/Maria-s-Wishlist-2c28d5786a5481788433d17776b3990e?source=copy_link",
+    "Asia": "https://www.notion.so/Asia-s-Wishlist-2c28d5786a548143b8d0dfde76d1edbc?source=copy_link",
+    "Zuza": "https://www.notion.so/Zuza-s-Wishlist-2c28d5786a548109a108c91227808e01?source=copy_link",
+    "Jan": "https://www.notion.so/Jan-s-Wishlist-2c28d5786a548180be37e24c86d46b4c?source=copy_link",
+}
 
 # Base directory and media paths
 BASE_DIR = Path(__file__).parent
@@ -63,150 +61,16 @@ SANTA_AUDIO_PATH = os.getenv(
     str(BASE_DIR / "assets" / "intro_jingle.mp3"),
 )
 
-
-# Number of recipients assigned to each giver (1 by default; future configurable)
+# Number of recipients assigned to each giver (still used by drawing.py)
 ASSIGNMENTS_PER_GIVER = int(os.getenv("ASSIGNMENTS_PER_GIVER", "1"))
 
-STATE_FILE = Path(f"fair_assign_state_{APP_MODE}.json")
+# Fixed assignments file, generated once by drawing.py and committed to the repo
+ASSIGNMENTS_FILE = BASE_DIR / "assignments_prod.json"
 
 
 # ---------------------------------------------------------------------------
-# State helpers
+# Assignment helpers (used by drawing.py and this app)
 # ---------------------------------------------------------------------------
-
-def _safe_rerun() -> None:
-    """Call st.rerun when available, falling back to experimental API."""
-    rerun_fn = getattr(st, "rerun", None)
-    if callable(rerun_fn):
-        rerun_fn()
-    else:
-        st.experimental_rerun()
-
-
-def init_state() -> Dict:
-    """Create a fresh state structure for the current mode."""
-    return {
-        "users": {
-            name: {
-                "preferences": [],  # list[{"text": str, "status": "open"|"reserved"|"bought", "marked_by": Optional[str]}]
-                "confirmed": False,
-                "result_revealed": False,
-            }
-            for name in USER_NAMES
-        },
-        # Generate assignments once at app start
-        # Mapping: giver -> list of recipients
-        "assignments": {giver: recips for giver, recips in generate_assignments(USER_NAMES, ASSIGNMENTS_PER_GIVER).items()},
-        "assignments_generated": True,
-    }
-
-
-def save_state(state: Dict) -> None:
-    """Safely save state to disk as JSON."""
-    tmp = STATE_FILE.with_suffix(".tmp")
-    with tmp.open("w", encoding="utf-8") as f:
-        json.dump(state, f, indent=2, ensure_ascii=False)
-    tmp.replace(STATE_FILE)
-
-
-def load_state() -> Dict:
-    """Load state from disk, or create a fresh one if needed."""
-    if not STATE_FILE.exists():
-        state = init_state()
-        save_state(state)
-        return state
-
-    try:
-        with STATE_FILE.open("r", encoding="utf-8") as f:
-            state = json.load(f)
-    except Exception:
-        # Corrupted file or JSON error; start over
-        state = init_state()
-        save_state(state)
-        return state
-
-    changed = False
-
-    # Ensure basic keys
-    if "users" not in state or not isinstance(state["users"], dict):
-        state["users"] = {}
-        changed = True
-    if "assignments" not in state or not isinstance(state["assignments"], dict):
-        state["assignments"] = {}
-        changed = True
-    if "assignments_generated" not in state:
-        state["assignments_generated"] = True
-        changed = True
-
-    # Ensure all participants exist and have expected fields
-    for name in USER_NAMES:
-        if name not in state["users"]:
-            state["users"][name] = {
-                "preferences": [],
-                "confirmed": False,
-                "result_revealed": False,
-            }
-            changed = True
-        else:
-            u = state["users"][name]
-            # Normalize preferences into structured list
-            if "preferences" not in u or not isinstance(u["preferences"], list):
-                u["preferences"] = []
-                changed = True
-            # Migrate legacy string lists to structured dict entries
-            migrated_prefs = []
-            for item in u.get("preferences", []):
-                if isinstance(item, str):
-                    text = item.strip()
-                    if text:
-                        migrated_prefs.append({"text": text, "status": "open", "marked_by": None})
-                elif isinstance(item, dict):
-                    text = (item.get("text") or "").strip()
-                    status = item.get("status") or "open"
-                    marked_by = item.get("marked_by")
-                    if text:
-                        if status not in ("open", "reserved", "bought"):
-                            status = "open"
-                        migrated_prefs.append({"text": text, "status": status, "marked_by": marked_by})
-            if migrated_prefs != u.get("preferences"):
-                u["preferences"] = migrated_prefs
-                changed = True
-            if "confirmed" not in u:
-                u["confirmed"] = False
-                changed = True
-            if "result_revealed" not in u:
-                u["result_revealed"] = False
-                changed = True
-
-    # Remove any users that are no longer in the participant list
-    for name in list(state["users"].keys()):
-        if name not in USER_NAMES:
-            del state["users"][name]
-            changed = True
-
-    # Validate or (re)create assignments if needed
-    assignments = state.get("assignments", {})
-    # Convert legacy mapping of giver -> single recipient into list form
-    legacy_detected = False
-    if isinstance(assignments, dict) and assignments and all(isinstance(v, str) for v in assignments.values()):
-        assignments = {giver: [recipient] for giver, recipient in assignments.items()}
-        legacy_detected = True
-    if legacy_detected or not is_valid_assignments(assignments, USER_NAMES):
-        state["assignments"] = generate_assignments(USER_NAMES, ASSIGNMENTS_PER_GIVER)
-        changed = True
-    else:
-        state["assignments"] = assignments
-
-    if changed:
-        save_state(state)
-
-    return state
-
-
-def all_users_confirmed(state: Dict) -> bool:
-    users = state.get("users", {})
-    return bool(users) and all(u.get("confirmed") for u in users.values())
-
 
 def generate_derangement(names: List[str]) -> Dict[str, str]:
     """Return a random mapping where no one gets themselves."""
@@ -233,6 +97,7 @@ def is_valid_derangement(mapping: Dict[str, str], names: List[str]) -> bool:
             return False
     return True
 
+
 def is_valid_assignments(mapping: Dict[str, List[str]], names: List[str]) -> bool:
     """Validate mapping giver -> list of recipients (no self-assignments)."""
     if not isinstance(mapping, dict):
@@ -251,6 +116,7 @@ def is_valid_assignments(mapping: Dict[str, List[str]], names: List[str]) -> boo
                 return False
             seen.add(r)
     return True
+
 
 def generate_assignments(names: List[str], recipients_per_giver: int) -> Dict[str, List[str]]:
     """
@@ -278,33 +144,35 @@ def generate_assignments(names: List[str], recipients_per_giver: int) -> Dict[st
                 lst.append(recipient)
     return combined
 
-def get_recipients_for_giver(state: Dict, giver: str) -> List[str]:
-    """Return the list of recipients assigned to the given user."""
-    assignments = state.get("assignments", {}) or {}
+
+def load_fixed_assignments() -> Dict[str, List[str]]:
+    """
+    Load assignments from assignments_prod.json in the repo.
+    If the file is missing or invalid, return an empty dict.
+    """
+    if not ASSIGNMENTS_FILE.exists():
+        return {}
+    try:
+        raw = ASSIGNMENTS_FILE.read_text(encoding="utf-8")
+        mapping = json.loads(raw)
+    except Exception:
+        return {}
+    # Accept legacy form giver -> single recipient string
+    if isinstance(mapping, dict) and mapping and all(isinstance(v, str) for v in mapping.values()):
+        mapping = {g: [r] for g, r in mapping.items()}
+    if not is_valid_assignments(mapping, USER_NAMES):
+        return {}
+    return mapping
+
+
+def get_recipients_for_giver(assignments: Dict[str, List[str]], giver: str) -> List[str]:
+    """Return the list of recipients assigned to the given user from fixed assignments."""
     recipients = assignments.get(giver) or []
-    # Normalize string -> list if any legacy remains
     if isinstance(recipients, str):
         return [recipients]
     if not isinstance(recipients, list):
         return []
     return recipients
-
-
-def ensure_assignments(state: Dict) -> None:
-    """Ensure assignments exist and are valid. In this simplified model, they are generated at startup."""
-    assignments = state.get("assignments", {})
-    # Normalize legacy form if necessary
-    if isinstance(assignments, dict) and assignments and all(isinstance(v, str) for v in assignments.values()):
-        assignments = {g: [r] for g, r in assignments.items()}
-    if not is_valid_assignments(assignments, USER_NAMES):
-        state["assignments"] = generate_assignments(USER_NAMES, ASSIGNMENTS_PER_GIVER)
-        state["assignments_generated"] = True
-        save_state(state)
-    else:
-        # Valid assignments exist; ensure the flag is set
-        if not state.get("assignments_generated"):
-            state["assignments_generated"] = True
-            save_state(state)
 
 
 def authenticate(name: str, password: str) -> bool:
@@ -315,6 +183,15 @@ def authenticate(name: str, password: str) -> bool:
 # ---------------------------------------------------------------------------
 # UI helpers
 # ---------------------------------------------------------------------------
+
+def _safe_rerun() -> None:
+    """Call st.rerun when available, falling back to experimental API."""
+    rerun_fn = getattr(st, "rerun", None)
+    if callable(rerun_fn):
+        rerun_fn()
+    else:
+        st.experimental_rerun()
+
 
 def go(view: str, return_view: str | None = None, *, music_on: bool | None = None, clear_return: bool = False) -> None:
     """
@@ -332,6 +209,7 @@ def go(view: str, return_view: str | None = None, *, music_on: bool | None = Non
         st.session_state["bg_music_on"] = music_on
     st.session_state["main_view"] = view
     _safe_rerun()  # immediate clean rerun so previous containers disappear
+
 
 def add_christmas_style() -> None:
     """Simple Christmas themed background and card styling."""
@@ -431,30 +309,21 @@ def add_christmas_style() -> None:
     box-shadow: 0 0 0 3px rgba(105,145,255,0.15);
     outline: none;
 }
-/* Make disabled buttons (Reserved / Unmark) clearly visible */
+/* Make disabled buttons clearly visible */
 .stButton > button:disabled,
 .stButton > button[disabled],
 .stButton > button[aria-disabled="true"] {
-    opacity: 1 !important;              /* no fading */
+    opacity: 1 !important;
     filter: none !important;
-    background-color: #111827 !important;  /* dark navy (same as normal button) */
-    color: #ffffff !important;             /* white text */
+    background-color: #111827 !important;
+    color: #ffffff !important;
     border-color: #111827 !important;
-    cursor: not-allowed !important;        /* still looks disabled */
+    cursor: not-allowed !important;
 }
 .buying-for {
     font-size: 1.25rem;
     font-weight: 700;
     margin: 0.2rem 0 0.6rem;
-}
-.reserved-badge {
-    display: inline-block;
-    background: #2ea043;
-    color: #ffffff;
-    padding: 2px 8px;
-    border-radius: 999px;
-    font-size: 0.75rem;
-    margin-left: 6px;
 }
 .christmas-title {
     text-align: center;
@@ -599,6 +468,7 @@ def preload_christmas_clip() -> None:
         # Ignore preloading errors
         pass
 
+
 def show_fullscreen_clip_once(video_src: str) -> bool:
     """
     If the 'show_assignment_clip' flag is set, render a near-fullscreen video
@@ -659,39 +529,6 @@ def show_fullscreen_clip_once(video_src: str) -> bool:
     return True
 
 
-def on_wishlist_change(user_name: str, state: Dict) -> None:
-    """Autosave wishlist when any input changes."""
-    user_state = state["users"][user_name]
-    existing_items = user_state.get("preferences") or []
-
-    # Build new list from inputs, preserving status for unchanged texts
-    existing_by_text = {item["text"]: item for item in existing_items if isinstance(item, dict) and "text" in item}
-
-    new_items: List[Dict] = []
-    for i in range(7):
-        key = f"wishlist_input_{user_name}_{i}"
-        raw = st.session_state.get(key, "")
-        value = (raw or "").strip()
-        if value:
-            prev = existing_by_text.get(value)
-            if prev:
-                new_items.append({"text": value, "status": prev.get("status", "open"), "marked_by": prev.get("marked_by")})
-            else:
-                new_items.append({"text": value, "status": "open", "marked_by": None})
-
-    user_state["preferences"] = new_items
-    user_state["confirmed"] = bool(new_items)
-    save_state(state)
-    st.session_state["wishlist_saved_ts"] = time.time()
-    # Ephemeral toast if available
-    toast_fn = getattr(st, "toast", None)
-    if callable(toast_fn):
-        try:
-            toast_fn("Wishlist saved", icon="✅")
-        except Exception:
-            pass
-
-
 def show_login() -> str | None:
     """Show login form and return the authenticated user name, or None."""
     with st.container(border=True):
@@ -712,13 +549,13 @@ def show_login() -> str | None:
     return st.session_state.get("current_user")
 
 
-def show_preferences_ui(user_name: str, state: Dict) -> None:
-    """Page where a user defines their wishlist."""
-    user_state = state["users"][user_name]
-    existing_prefs = user_state.get("preferences") or []
-
+def show_preferences_ui(user_name: str) -> None:
+    """
+    Wishlist screen.
+    In the simplified app, this just points the user to their external wishlist link.
+    """
     with st.container(border=True):
-        st.markdown('<div class="caption-bg"><h3 style="margin:0;">Edit your wishlist</h3></div>', unsafe_allow_html=True)
+        st.markdown('<div class="caption-bg"><h3 style="margin:0;">Your wishlist</h3></div>', unsafe_allow_html=True)
 
         # --- Back button ---
         if st.button("⬅ Back", use_container_width=True):
@@ -726,162 +563,18 @@ def show_preferences_ui(user_name: str, state: Dict) -> None:
             st.session_state["bg_music_on"] = back_target in ("home", "wishlist")
             go(back_target, clear_return=True)
 
-        # Caution caption if others have reserved/bought items
-        any_marked = any(
-            isinstance(item, dict)
-            and item.get("status") in ("reserved",)
-            and item.get("marked_by") != user_name
-            for item in existing_prefs
-        )
-        if any_marked:
-            st.markdown(
-                '<div class="caption-bg small">Some of your gifts might have been reserved! '
-                "Be careful with editing.</div>",
-                unsafe_allow_html=True,
-            )
+        url = WISHLIST_LINKS.get(user_name)
 
-        # Show ephemeral saved caption at the top (visible for ~5s after save)
-        ts = st.session_state.get("wishlist_saved_ts")
-        if ts is not None:
-            try:
-                if (time.time() - ts) <= 5:
-                    st.caption("✓ Wishlist saved")
-            except Exception:
-                pass
+        if not url:
+            st.warning("No wishlist link configured for you yet. Please contact the organizer.")
+            return
+
+        st.write("You can edit your wishlist in this shared note:")
+        st.link_button("Open your wishlist", url, use_container_width=True)
 
 
-        # Batch inputs inside a form to avoid reruns on every field change
-        with st.form(f"wishes_{user_name}"):
-            for i in range(7):
-                default_value = ""
-                if i < len(existing_prefs) and isinstance(existing_prefs[i], dict):
-                    default_value = existing_prefs[i].get("text", "")
-                st.text_input(
-                    f"Gift idea {i + 1}",
-                    value=default_value,
-                    key=f"wishlist_input_{user_name}_{i}",
-                )
-            submitted = st.form_submit_button("Save wishlist")
-            if submitted:
-                # Save all 7 inputs at once; preserve status for unchanged texts
-                existing_by_text = {
-                    item["text"]: item
-                    for item in (user_state.get("preferences") or [])
-                    if isinstance(item, dict) and "text" in item
-                }
-                new_items: List[Dict] = []
-                for i in range(7):
-                    raw = st.session_state.get(f"wishlist_input_{user_name}_{i}", "")
-                    value = (raw or "").strip()
-                    if value:
-                        prev = existing_by_text.get(value)
-                        if prev:
-                            new_items.append({"text": value, "status": prev.get("status", "open"), "marked_by": prev.get("marked_by")})
-                        else:
-                            new_items.append({"text": value, "status": "open", "marked_by": None})
-                user_state["preferences"] = new_items
-                user_state["confirmed"] = bool(new_items)
-                save_state(state)
-                st.session_state["wishlist_saved_ts"] = time.time()
-                toast_fn = getattr(st, "toast", None)
-                if callable(toast_fn):
-                    try:
-                        toast_fn("Wishlist saved", icon="✅")
-                    except Exception:
-                        pass
-
-        completed = sum(1 for u in state["users"].values() if u.get("confirmed"))
-        total = len(state["users"])
-        st.info(f"{completed} of {total} participants have saved their wishlist.")
-
-        # Status overview for fun; full details in test mode developer panel
-        with st.expander("Progress of everyone", expanded=False):
-            for name, u in state["users"].items():
-                mark = "✓" if u.get("confirmed") else "•"
-                st.write(f"{mark} {name}")
-
-
-@st.fragment
-def render_recipient_block(user_name: str, recipient: str, state: Dict) -> None:
-    """Render a single recipient wishlist and action buttons as a fragment."""
-    header_cols = st.columns([4, 2])
-    with header_cols[0]:
-        st.markdown(f"**{recipient}'s wishlist**")
-    prefs = state["users"].get(recipient, {}).get("preferences") or []
-    if not prefs:
-        st.markdown(
-            f'<div class="caption-bg small">{recipient} didn\'t add any wishlist item yet. '
-            f'Use your imagination or contact {recipient}!</div>',
-            unsafe_allow_html=True,
-        )
-        st.write("")
-        return
-    with header_cols[1]:
-        try:
-            lines = []
-            for i, it in enumerate(prefs):
-                if not isinstance(it, dict):
-                    continue
-                txt = (it.get("text") or "").strip()
-                if not txt:
-                    continue
-                status = it.get("status", "open")
-                marked_by = it.get("marked_by")
-                suffix = ""
-                if status == "reserved":
-                    suffix = " - Reserved by you" if marked_by == user_name else " - Reserved by someone"
-                lines.append(f"{i + 1}. {txt}{suffix}")
-            wishlist_text = "\n".join(lines) or "No wishlist items"
-            st.download_button(
-                label="Download wishlist (.txt)",
-                data=wishlist_text,
-                file_name=f"wishlist_{recipient}.txt",
-                mime="text/plain",
-                key=f"download_wishlist_{user_name}_{recipient}",
-            )
-        except Exception:
-            pass
-
-    for idx, item in enumerate(prefs):
-        text = item.get("text", "")
-        status = item.get("status", "open")
-        marked_by = item.get("marked_by")
-
-        cols = st.columns([6, 2, 2])
-        with cols[0]:
-            label_html = f"{idx + 1}. {text}"
-            if status == "reserved":
-                badge = "Reserved by you" if marked_by == user_name else "Reserved by someone"
-                label_html += f' <span class="reserved-badge">{badge}</span>'
-            st.markdown(label_html, unsafe_allow_html=True)
-
-        # Disable reserve if already reserved by someone else
-        disable_reserve = status == "reserved" and marked_by != user_name
-        disable_unmark = not (status == "reserved" and marked_by == user_name)
-
-        reserve_key = f"reserve_{user_name}_{recipient}_{idx}"
-        clear_key = f"clear_{user_name}_{recipient}_{idx}"
-
-        with cols[1]:
-            # If already reserved by current user, show disabled "Reserved" button
-            if status == "reserved" and marked_by == user_name:
-                st.button("Reserved", key=reserve_key, disabled=True)
-            elif st.button("Reserve", key=reserve_key, disabled=disable_reserve):
-                item["status"] = "reserved"
-                item["marked_by"] = user_name
-                save_state(state)
-                _safe_rerun()  # immediate rerun so status/disabled reflect the change
-        with cols[2]:
-            if st.button("Unmark", key=clear_key, disabled=disable_unmark):
-                item["status"] = "open"
-                item["marked_by"] = None
-                save_state(state)
-                _safe_rerun()  # immediate rerun so status/disabled reflect the change
-
-    st.write("")
-
-def show_assignment_ui(user_name: str, state: Dict) -> None:
-    """Page where a user sees their final assignment and can mark items reserved/bought."""
+def show_assignment_ui(user_name: str, assignments: Dict[str, List[str]]) -> None:
+    """Page where a user sees their fixed assignment and links to recipients' wishlists."""
     with st.container(border=True):
         st.subheader("Your Secret Santa draw")
 
@@ -894,7 +587,7 @@ def show_assignment_ui(user_name: str, state: Dict) -> None:
             st.session_state["bg_music_on"] = back_target in ("home", "wishlist")
             go(back_target, clear_return=True)
 
-        recipients = get_recipients_for_giver(state, user_name)
+        recipients = get_recipients_for_giver(assignments, user_name)
         if not recipients:
             st.info("Assignments are not ready yet. Please check back later.")
             return
@@ -903,34 +596,12 @@ def show_assignment_ui(user_name: str, state: Dict) -> None:
         st.write("")
 
         for recipient in recipients:
-            render_recipient_block(user_name, recipient, state)
-
-        # Reservation info moved below and hidden behind an expander
-        with st.expander("Info"):
-            # Build a readable label for one vs many giftees
-            if len(recipients) == 1:
-                giftee_label = recipients[0]
-                does_verb = "does"
-                sees_verb = "sees"
+            st.markdown(f"#### {recipient}'s wishlist")
+            url = WISHLIST_LINKS.get(recipient)
+            if url:
+                st.link_button(f"Open {recipient}'s wishlist", url, use_container_width=True)
             else:
-                giftee_label = "your recipients"
-                does_verb = "do"
-                sees_verb = "see"
-
-            info_html = f"""
-            <div class="caption-bg">
-              <ul style="margin: 0; padding-left: 1.1rem;">
-                <li>{giftee_label} {does_verb} not see which specific item was reserved.</li>
-                <li>You can mark gift(s) as reserved and unmark as many times as you want.</li>
-                <li>Other buyers (if any), except {giftee_label}, can see that specific item was reserved to avoid duplicate purchases.</li>
-                <li>{giftee_label} only {sees_verb} that some items are reserved, without details.</li>
-                <li>If you reopen the page, you will see others' changes immediately after they are done, within the visibility limits described above.</li>
-              </ul>
-            </div>
-            """
-            st.markdown(info_html, unsafe_allow_html=True)
-
-        # Video CTA is shown only on the main (home) screen after login
+                st.caption("Wishlist link not configured yet.")
 
 
 def show_video_page() -> None:
@@ -976,6 +647,7 @@ def show_video_page() -> None:
         st.session_state["bg_music_on"] = back_target in ("home", "wishlist")
         go(back_target, clear_return=True)
 
+
 def render_bottom_video_cta(current_user: str | None) -> None:
     """Render a bottom-of-page CTA to open the video subpage (only when logged in)."""
     if not current_user:
@@ -989,63 +661,6 @@ def render_bottom_video_cta(current_user: str | None) -> None:
             # remember where we came from and navigate in a clean rerun
             current = st.session_state.get("main_view", "home")
             go("video", return_view=current, music_on=False)
-
-def show_test_panel(state: Dict) -> None:
-    """Developer tools only in TEST mode."""
-    st.sidebar.markdown("---")
-    st.sidebar.subheader("Test mode panel")
-
-    st.sidebar.write(f"Assignments finalized: {state.get('assignments_generated')}")
-
-    # Show current (draft or final) assignments in test mode
-    if state.get("assignments"):
-        header = (
-            "**Assignments (final)**"
-            if state.get("assignments_generated")
-            else "**Assignments (current draft)**"
-        )
-        st.sidebar.markdown(header)
-        for giver, recipients in state["assignments"].items():
-            if isinstance(recipients, list):
-                st.sidebar.write(f"{giver} → {', '.join(recipients)}")
-            else:
-                st.sidebar.write(f"{giver} → {recipients}")
-
-    # Allow regenerating assignments anytime in test mode
-    if APP_MODE == "test":
-        if st.sidebar.button("Regenerate assignments"):
-            state["assignments"] = generate_assignments(USER_NAMES, ASSIGNMENTS_PER_GIVER)
-            state["assignments_generated"] = True
-            save_state(state)
-            st.sidebar.success("Assignments regenerated.")
-
-    with st.sidebar.expander("User details and wishlists", expanded=False):
-        for name, u in state["users"].items():
-            st.write(f"**{name}**")
-            st.write(
-                f"confirmed: {u.get('confirmed')}, "
-                f"revealed: {u.get('result_revealed')}"
-            )
-            prefs = u.get("preferences") or []
-            if prefs:
-                for idx, item in enumerate(prefs, 1):
-                    if isinstance(item, dict):
-                        suffix = ""
-                        if item.get("status") == "reserved":
-                            suffix = f" (reserved by {item.get('marked_by')})"
-                        elif item.get("status") == "bought":
-                            suffix = f" (bought by {item.get('marked_by')})"
-                        st.write(f"{idx}. {item.get('text', '')}{suffix}")
-                    else:
-                        st.write(f"{idx}. {item}")
-            else:
-                st.write("no wishlist items")
-            st.write("")
-
-    if st.sidebar.button("Reset all data for this mode"):
-        new_state = init_state()
-        save_state(new_state)
-        st.sidebar.success("State reset. The page will reload.")
 
 
 # ---------------------------------------------------------------------------
@@ -1081,13 +696,11 @@ def show_entry_gate() -> bool:
     return False
 
 
-def show_home_menu(state: Dict, current_user: str) -> None:
+def show_home_menu(current_user: str, assignments: Dict[str, List[str]]) -> None:
     """
     Show two main actions:
-    - Enter / edit gifts
-    - See assigned person (once assignments are generated)
-
-    Sets st.session_state["main_view"] accordingly.
+    - See assigned person
+    - Open / edit wishlist (external link)
     """
 
     with st.container(border=True):
@@ -1103,20 +716,11 @@ def show_home_menu(state: Dict, current_user: str) -> None:
             if st.button("🎁 Edit your wishlist", use_container_width=True):
                 go("wishlist", return_view="home", music_on=True)
 
-        # Status hint (show once for up to 30 seconds, then never again this session)
-        if state.get("assignments_generated"):
-            dismissed = st.session_state.get("draw_ready_dismissed", False)
-            ts = st.session_state.get("draw_ready_ts")
-            now = time.time()
-            if not dismissed:
-                if ts is None:
-                    st.session_state["draw_ready_ts"] = now
-                    st.success("The draw is ready. You can see who you got.")
-                else:
-                    if (now - ts) <= 30:
-                        st.success("The draw is ready. You can see who you got.")
-                    else:
-                        st.session_state["draw_ready_dismissed"] = True
+        if assignments:
+            st.success("The draw is ready. You can see who you got.")
+        else:
+            st.info("The draw has not been generated yet. Please check back later.")
+
 
 def main() -> None:
     st.set_page_config(
@@ -1125,27 +729,17 @@ def main() -> None:
     )
     add_christmas_style()
 
-    # Show the heading (and mode in TEST) only before entering the lodge
+    # Show the heading only before entering the lodge
     if not st.session_state.get("entered_lodge"):
         st.markdown('<div class="christmas-title">Fair Assign – Secret Santa</div>', unsafe_allow_html=True)
         st.markdown(
             '<div class="christmas-subtitle">'
-            'Shared Christmas wishlist with random assignments'
-            "</div>",
+            'Shared Christmas wishlist with fixed random assignments'
+            '</div>',
             unsafe_allow_html=True,
         )
 
-        # In test mode, show the current mode to make it obvious you are not on prod.
-        # In prod, keep the UI clean and do not show the mode caption.
-        if APP_MODE == "test":
-            st.markdown(
-                f"<p style='text-align:center; color:#ffffff; font-size:0.9rem;'>"
-                f"Current mode: <strong>{APP_MODE.upper()}</strong>"
-                "</p>",
-                unsafe_allow_html=True,
-            )
-
-    # NEW: entry gate with big Play button and intro audio
+    # Entry gate with big Play button and intro audio
     if not show_entry_gate():
         # User has not pressed Play yet; do not show login or anything else
         return
@@ -1153,7 +747,8 @@ def main() -> None:
     # Render background music (looping) if enabled
     render_background_music()
 
-    state = load_state()
+    # Load fixed assignments
+    assignments = load_fixed_assignments()
 
     # Login
     current_user = st.session_state.get("current_user")
@@ -1161,21 +756,13 @@ def main() -> None:
         current_user = show_login()
         if not current_user:
             # No valid login yet, stop rendering further UI
-            if APP_MODE == "test":
-                # Still show test panel if you want to inspect state without logging in
-                show_test_panel(state)
             return
-
-    # Skip preloading the video to keep the page snappy; it will load on demand
 
     # Sidebar user panel
     st.sidebar.write(f"Logged in as: **{current_user}**")
     if st.sidebar.button("Log out"):
         st.session_state.clear()
         st.rerun()
-
-    # Generate assignments once possible
-    ensure_assignments(state)
 
     # Default view
     if "main_view" not in st.session_state:
@@ -1185,15 +772,15 @@ def main() -> None:
     view = st.session_state.get("main_view", "home")
 
     if view == "home":
-        show_home_menu(state, current_user)
+        show_home_menu(current_user, assignments)
     elif view == "wishlist":
         # Resume background music on non-video views
         st.session_state["bg_music_on"] = True
-        show_preferences_ui(current_user, state)
+        show_preferences_ui(current_user)
     elif view == "assignment":
-        # Always allow viewing assignment immediately
+        # Show fixed assignment
         st.session_state["bg_music_on"] = False
-        show_assignment_ui(current_user, state)
+        show_assignment_ui(current_user, assignments)
     elif view == "video":
         # Dedicated subpage with just the video
         st.session_state["bg_music_on"] = False
@@ -1202,9 +789,6 @@ def main() -> None:
     # Bottom CTA only on home
     if view == "home":
         render_bottom_video_cta(current_user)
-
-    if APP_MODE == "test":
-        show_test_panel(state)
 
 
 if __name__ == "__main__":
