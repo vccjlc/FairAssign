@@ -569,7 +569,7 @@ def show_preferences_ui(user_name: str) -> None:
             st.warning("No wishlist link configured for you yet. Please contact the organizer.")
             return
 
-        st.write("You can edit your wishlist in this shared note:")
+        st.write("You can edit your wishlist here:")
         st.link_button("Open your wishlist", url, use_container_width=True)
 
 
