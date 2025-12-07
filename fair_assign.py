@@ -58,7 +58,7 @@ CHRISTMAS_CLIP_PATH = os.getenv(
 
 SANTA_AUDIO_PATH = os.getenv(
     "SANTA_AUDIO_PATH",
-    str(BASE_DIR / "assets" / "intro_jingle.mp3"),
+    str(BASE_DIR / "assets" / "intro_jingle_new.mp3"),
 )
 
 # Number of recipients assigned to each giver (still used by drawing.py)
