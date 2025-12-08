@@ -249,13 +249,13 @@ def add_christmas_style() -> None:
     display: none !important;
 }
 .caption-bg, .christmas-card .caption-bg {
-    background: #e9edf5;
+    background: rgba(0, 0, 0, 0.55);
     padding: 0.5rem 0.75rem;
     border-radius: 0.5rem;
     margin-bottom: 0.6rem;
-    border: 1px solid #d6dbea;
-    box-shadow: 0 1px 2px rgba(0,0,0,0.03);
-    color: #111111;
+    border: 1px solid rgba(255, 255, 255, 0.35);
+    box-shadow: 0 1px 2px rgba(0,0,0,0.3);
+    color: #ffffff;
 }
 .caption-bg.small, .christmas-card .caption-bg.small {
     font-size: 0.95rem;
@@ -746,6 +746,12 @@ def main() -> None:
 
     # Render background music (looping) if enabled
     render_background_music()
+
+    # Manual fallback in case browser blocks autoplay
+    if st.session_state.get("bg_music_on") and SANTA_AUDIO_PATH:
+        with st.sidebar:
+            if st.button("▶ Play music", key="play_music_manual"):
+                play_hidden_audio(SANTA_AUDIO_PATH)
 
     # Load fixed assignments
     assignments = load_fixed_assignments()
