@@ -679,7 +679,7 @@ def show_entry_gate() -> bool:
 
     entered = False
     with st.container(border=True):
-        st.markdown("<h2 style='margin-bottom: 0.5rem; text-align:center;'>Welcome to the Christmas lodge</h2>", unsafe_allow_html=True)
+        st.markdown("<div class='caption-bg'><h2 style='margin:0; text-align:center;'>Welcome to the Christmas lodge</h2></div>", unsafe_allow_html=True)
         entered = st.button(
             "▶ Enter",
             key="enter_lodge_button",
@@ -746,12 +746,6 @@ def main() -> None:
 
     # Render background music (looping) if enabled
     render_background_music()
-
-    # Manual fallback in case browser blocks autoplay
-    if st.session_state.get("bg_music_on") and SANTA_AUDIO_PATH:
-        with st.sidebar:
-            if st.button("▶ Play music", key="play_music_manual"):
-                play_hidden_audio(SANTA_AUDIO_PATH)
 
     # Load fixed assignments
     assignments = load_fixed_assignments()
