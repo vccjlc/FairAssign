@@ -535,8 +535,29 @@ def show_login() -> str | None:
         st.subheader("Log in")
 
         with st.form("login_form"):
-            name = st.selectbox("Who are you", USER_NAMES)
-            password = st.text_input("Password", type="password")
+
+            # White caption-style label for "Who are you"
+            st.markdown(
+                '<div class="caption-bg small">Who are you</div>',
+                unsafe_allow_html=True,
+            )
+            name = st.selectbox(
+                "",
+                USER_NAMES,
+                label_visibility="collapsed",
+            )
+
+            # White caption-style label for "Password"
+            st.markdown(
+                '<div class="caption-bg small">Password</div>',
+                unsafe_allow_html=True,
+            )
+            password = st.text_input(
+                "",
+                type="password",
+                label_visibility="collapsed",
+            )
+
             submitted = st.form_submit_button("Enter the Christmas lodge")
 
         if submitted:
@@ -576,10 +597,10 @@ def show_preferences_ui(user_name: str) -> None:
 def show_assignment_ui(user_name: str, assignments: Dict[str, List[str]]) -> None:
     """Page where a user sees their fixed assignment and links to recipients' wishlists."""
     with st.container(border=True):
-        st.subheader("Your Secret Santa draw")
-
-        # Pause background music while on assignment view
-        st.session_state["bg_music_on"] = False
+        st.markdown(
+            '<div class="caption-bg"><h3 style="margin:0;">Your Secret Santa draw</h3></div>',
+            unsafe_allow_html=True,
+        )
 
         # --- Back button ---
         if st.button("⬅ Back", use_container_width=True):
@@ -592,7 +613,10 @@ def show_assignment_ui(user_name: str, assignments: Dict[str, List[str]]) -> Non
             st.info("Assignments are not ready yet. Please check back later.")
             return
 
-        st.markdown('<div class="buying-for">You are buying for: ' + ", ".join(recipients) + "</div>", unsafe_allow_html=True)
+        st.markdown(
+            '<div class="caption-bg small">You are buying for: ' + ", ".join(recipients) + "</div>",
+            unsafe_allow_html=True,
+        )
         st.write("")
 
         for recipient in recipients:
@@ -710,7 +734,8 @@ def show_home_menu(current_user: str, assignments: Dict[str, List[str]]) -> None
 
         with col1:
             if st.button("⭐ See who you got", use_container_width=True):
-                go("assignment", return_view="home", music_on=False)
+                # Do not touch music here; keep whatever is currently playing
+                go("assignment", return_view="home")
 
         with col2:
             if st.button("🎁 Edit your wishlist", use_container_width=True):
